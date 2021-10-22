@@ -1,4 +1,3 @@
-librightstuff
--------------
+OptRand-------------
 
-Work-in-progress: supports basic Sync HS (03/07/2019)
+Work-in-progress: supports fast path of OptRand (10/22/2021)
