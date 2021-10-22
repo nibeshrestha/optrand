@@ -46,6 +46,7 @@ add_dependencies(secp256k1 libsecp256k1)
 
 include_directories(./)
 include_directories(include)
+include_directories(/usr/local/include/jerasure)
 add_library(hotstuff
     OBJECT
     src/util.cpp
@@ -54,6 +55,7 @@ add_library(hotstuff
     src/entity.cpp
     src/consensus.cpp
     src/hotstuff.cpp
+    src/erasure.cpp
     )
 
 option(BUILD_SHARED "build shared library." OFF)
@@ -61,11 +63,11 @@ if(BUILD_SHARED)
     set_property(TARGET hotstuff PROPERTY POSITION_INDEPENDENT_CODE 1)
     add_library(hotstuff_shared SHARED $<TARGET_OBJECTS:hotstuff>)
     set_target_properties(hotstuff_shared PROPERTIES OUTPUT_NAME "hotstuff")
-    target_link_libraries(hotstuff_shared salticidae_static secp256k1 crypto ${CMAKE_THREAD_LIBS_INIT})
+    target_link_libraries(hotstuff_shared salticidae_static secp256k1 crypto Jerasure ${CMAKE_THREAD_LIBS_INIT})
 endif()
 add_library(hotstuff_static STATIC $<TARGET_OBJECTS:hotstuff>)
 set_target_properties(hotstuff_static PROPERTIES OUTPUT_NAME "hotstuff")
-target_link_libraries(hotstuff_static salticidae_static secp256k1 crypto ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(hotstuff_static salticidae_static secp256k1 crypto Jerasure ${CMAKE_THREAD_LIBS_INIT})
 
 add_subdirectory(test)
 

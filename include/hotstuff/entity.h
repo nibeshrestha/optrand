@@ -37,6 +37,11 @@ enum EntityType {
     ENT_TYPE_BLK = 0x1
 };
 
+enum MessageType {
+    PROPOSAL = 0x0,
+    CERT = 0x1
+};
+
 struct ReplicaInfo {
     ReplicaID id;
     salticidae::NetAddr addr;
@@ -62,9 +67,12 @@ class ReplicaConfig {
     public:
     size_t nreplicas;
     size_t nmajority;
+    size_t nresponsive;
+    size_t nreconthres;
+
     double delta;
 
-    ReplicaConfig(): nreplicas(0), nmajority(0), delta(0) {}
+    ReplicaConfig(): nreplicas(0), nmajority(0), nresponsive(0), nreconthres(0), delta(0) {}
 
     void add_replica(ReplicaID rid, const ReplicaInfo &info) {
         replica_map.insert(std::make_pair(rid, info));
@@ -135,6 +143,7 @@ class Block {
     int8_t decision;
 
     std::unordered_set<ReplicaID> voted;
+    std::unordered_set<ReplicaID> acked;
 
     public:
     Block():

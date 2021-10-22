@@ -59,30 +59,12 @@ struct MsgVote {
     void postponed_parse(HotStuffCore *hsc);
 };
 
-struct MsgNotify {
+struct MsgStatus {
     static const opcode_t opcode = 0x4;
     DataStream serialized;
-    Notify notify;
-    MsgNotify(const Notify &);
-    MsgNotify(DataStream &&s): serialized(std::move(s)) {}
-    void postponed_parse(HotStuffCore *hsc);
-};
-
-struct MsgBlame {
-    static const opcode_t opcode = 0x5;
-    DataStream serialized;
-    Blame blame;
-    MsgBlame(const Blame &);
-    MsgBlame(DataStream &&s): serialized(std::move(s)) {}
-    void postponed_parse(HotStuffCore *hsc);
-};
-
-struct MsgBlameNotify {
-    static const opcode_t opcode = 0x6;
-    DataStream serialized;
-    BlameNotify bn;
-    MsgBlameNotify(const BlameNotify &);
-    MsgBlameNotify(DataStream &&s): serialized(std::move(s)) {}
+    Status status;
+    MsgStatus(const Status &);
+    MsgStatus(DataStream &&s): serialized(std::move(s)) {}
     void postponed_parse(HotStuffCore *hsc);
 };
 
@@ -113,6 +95,43 @@ struct MsgQC {
     MsgQC(DataStream &&s): serialized(std::move(s)) {}
     void postponed_parse(HotStuffCore *hsc);
 };
+
+struct MsgAck {
+    static const opcode_t opcode = 0x8;
+    DataStream serialized;
+    Ack ack;
+    MsgAck(const Ack &);
+    MsgAck(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgShare {
+    static const opcode_t opcode = 0x9;
+    DataStream serialized;
+    Share share;
+    MsgShare(const Share &);
+    MsgShare(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgEcho {
+    static const opcode_t opcode = 0x5;
+    DataStream serialized;
+    Echo echo;
+    MsgEcho(const Echo &);
+    MsgEcho(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgEcho2 {
+    static const opcode_t opcode = 0x6;
+    DataStream serialized;
+    Echo echo;
+    MsgEcho2(const Echo &);
+    MsgEcho2(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
 
 using promise::promise_t;
 
@@ -180,7 +199,7 @@ class HotStuffBase: public HotStuffCore {
     VeriPool vpool;
     std::vector<NetAddr> peers;
     std::unordered_map<uint32_t, TimerEvent> commit_timers;
-    TimerEvent blame_timer;
+    TimerEvent propose_timer;
     TimerEvent viewtrans_timer;
 
     private:
@@ -197,7 +216,6 @@ class HotStuffBase: public HotStuffCore {
     std::unordered_map<const uint256_t, BlockFetchContext> blk_fetch_waiting;
     std::unordered_map<const uint256_t, BlockDeliveryContext> blk_delivery_waiting;
     std::unordered_map<const uint256_t, commit_cb_t> decision_waiting;
-    std::unordered_set<uint256_t> proposed_cmds;
     using cmd_queue_t = salticidae::MPSCQueueEventDriven<std::pair<uint256_t, commit_cb_t>>;
     cmd_queue_t cmd_pending;
     std::queue<uint256_t> cmd_pending_buffer;
@@ -218,7 +236,10 @@ class HotStuffBase: public HotStuffCore {
     mutable double part_delivery_time_max;
     mutable std::unordered_map<const NetAddr, uint32_t> part_fetched_replica;
 
-    uint32_t proposed_view;
+    uint32_t last_proposed_view;
+
+    std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> status_received;
+
 
 #ifdef SYNCHS_LATBREAKDOWN
     struct CmdLatStat {
@@ -249,9 +270,7 @@ class HotStuffBase: public HotStuffCore {
     inline void propose_handler(MsgPropose &&, const Net::conn_t &);
     /** deliver consensus message: <vote> */
     inline void vote_handler(MsgVote &&, const Net::conn_t &);
-    inline void notify_handler(MsgNotify &&, const Net::conn_t &);
-    inline void blame_handler(MsgBlame &&, const Net::conn_t &);
-    inline void blamenotify_handler(MsgBlameNotify &&, const Net::conn_t &);
+    inline void status_handler(MsgStatus &&, const Net::conn_t &);
 
     /** fetches full block data */
     inline void req_blk_handler(MsgReqBlock &&, const Net::conn_t &);
@@ -259,6 +278,10 @@ class HotStuffBase: public HotStuffCore {
     inline void resp_blk_handler(MsgRespBlock &&, const Net::conn_t &);
 
     inline void qc_handler(MsgQC &&, const Net::conn_t &);
+    inline void ack_handler(MsgAck &&, const Net::conn_t &);
+    inline void share_handler(MsgShare &&, const Net::conn_t &);
+    inline void echo_handler(MsgEcho &&, const Net::conn_t &);
+    inline void echo2_handler(MsgEcho2 &&, const Net::conn_t &);
 
     inline bool conn_handler(const salticidae::ConnPool::conn_t &, bool);
     template<typename T, typename M>
@@ -291,33 +314,60 @@ class HotStuffBase: public HotStuffCore {
 
     }
 
-    void do_broadcast_blame(const Blame &blame) override {
-        _do_broadcast<Blame, MsgBlame>(blame);
-    }
 
-    void do_broadcast_blamenotify(const BlameNotify &bn) override {
-        _do_broadcast<BlameNotify, MsgBlameNotify>(bn);
-    }
-
-    void do_notify(const Notify &notify) override;
+    void do_status(const Status &status) override;
 
     void set_commit_timer(const block_t &blk, double t_sec) override;
     void stop_commit_timer(uint32_t height) override;
     void stop_commit_timer_all() override;
-    void set_blame_timer(double t_sec) override;
-    void stop_blame_timer() override;
+    void set_propose_timer(double t_sec) override;
+    void stop_propose_timer() override;
     void set_viewtrans_timer(double t_sec) override;
     void stop_viewtrans_timer() override;
 
     void do_decide(Finality &&) override;
     void do_consensus(const block_t &blk) override;
+    void do_propose();
+
+    void block_fetched(const block_t &blk, ReplicaID replicaId) override;
 
     void do_broadcast_qc(const QC &qc) override {
         _do_broadcast<QC, MsgQC>(qc);
     }
 
     void enter_view(uint32_t _view) override;
-    void update_proposed_cmds(const block_t &blk) override;
+
+    void do_vote(const Vote &vote, ReplicaID dest) override {
+        pn.send_msg(MsgVote(vote), get_config().get_addr(dest));
+     }
+
+    void do_broadcast_ack(const Ack &ack) override {
+        _do_broadcast<Ack, MsgAck>(ack);
+    }
+
+    void do_broadcast_share(const Share &share) override {
+        _do_broadcast<Share, MsgShare>(share);
+    }
+
+    void do_broadcast_echo(const Echo &echo) override {
+        _do_broadcast<Echo, MsgEcho>(echo);
+    }
+
+    void do_echo(const Echo &echo, ReplicaID dest) override {
+        pn.send_msg(MsgEcho(echo), get_config().get_addr(dest));
+    }
+
+    void do_broadcast_echo2(const Echo &echo) override {
+        _do_broadcast<Echo, MsgEcho2>(echo);
+    }
+
+    void do_echo2(const Echo &echo, ReplicaID dest) override {
+        pn.send_msg(MsgEcho2(echo), get_config().get_addr(dest));
+    }
+
+    void schedule_propose(double t_sec) override;
+
+    void process_status(Status &status);
 
     protected:
 
@@ -348,15 +398,13 @@ class HotStuffBase: public HotStuffCore {
     const auto &get_decision_waiting() const { return decision_waiting; }
     const auto &get_blk_size() const { return blk_size; }
     const auto &get_cmd_pending_size() const { return cmd_pending_buffer.size(); }
-    const auto &get_proposed_view() { return proposed_view; }
-    std::vector<uint256_t> fetch_cmds();
-    void set_proposed_view(const uint32_t _view) { proposed_view = _view; }
+    const auto &get_proposed_view() { return last_proposed_view; }
+    void set_proposed_view(const uint32_t _view) { last_proposed_view = _view; }
     ThreadCall &get_tcall() { return tcall; }
     PaceMaker *get_pace_maker() { return pmaker.get(); }
     void print_stat() const;
     virtual void do_elected() {}
 
-    void early_propose(uint32_t _view, const block_t &blk) override ;
 #ifdef SYNCHS_AUTOCLI
     virtual void do_demand_commands(size_t) {}
 #endif

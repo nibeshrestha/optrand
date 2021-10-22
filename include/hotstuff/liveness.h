@@ -246,6 +246,7 @@ class PMRoundRobinProposer: virtual public PaceMaker {
     promise_t pm_qc_finish;
     promise_t pm_wait_propose;
     promise_t pm_qc_manual;
+    promise_t pm_wait_status;
 
     void reg_proposal() {
         hsc->async_wait_proposal().then([this](const Proposal &prop) {
@@ -323,6 +324,7 @@ class PMRoundRobinProposer: virtual public PaceMaker {
         pm_qc_finish.reject();
         pm_wait_propose.reject();
         pm_qc_manual.reject();
+        pm_wait_status.reject();
         // start timer
 //        timer = TimerEvent(ec, salticidae::generic_bind(&PMRoundRobinProposer::on_exp_timeout, this, _1));
 //        timer.add(exp_timeout);
@@ -335,10 +337,12 @@ class PMRoundRobinProposer: virtual public PaceMaker {
         pm_qc_finish.reject();
         pm_wait_propose.reject();
         pm_qc_manual.reject();
+        pm_wait_status.reject();
         rotating = false;
         locked = false;
         last_proposed = hsc->get_genesis();
         proposer_update_last_proposed();
+
     }
 
     protected:

@@ -203,8 +203,8 @@ int main(int argc, char **argv) {
     nfaulty = (replicas.size() - 1) / 2;
     HOTSTUFF_LOG_INFO("nfaulty = %zu", nfaulty);
     connect_all();
-    set_req_timer();
-    while (try_send());
+//    set_req_timer();
+    try_send();
     ec.dispatch();
 
 #ifdef HOTSTUFF_ENABLE_BENCHMARK

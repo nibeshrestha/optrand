@@ -41,26 +41,13 @@ void MsgVote::postponed_parse(HotStuffCore *hsc) {
     serialized >> vote;
 }
 
-const opcode_t MsgNotify::opcode;
-MsgNotify::MsgNotify(const Notify &notify) { serialized << notify; }
-void MsgNotify::postponed_parse(HotStuffCore *hsc) {
-    notify.hsc = hsc;
-    serialized >> notify;
+const opcode_t MsgStatus::opcode;
+MsgStatus::MsgStatus(const Status &status) { serialized << status; }
+void MsgStatus::postponed_parse(HotStuffCore *hsc) {
+    status.hsc = hsc;
+    serialized >> status;
 }
 
-const opcode_t MsgBlame::opcode;
-MsgBlame::MsgBlame(const Blame &blame) { serialized << blame; }
-void MsgBlame::postponed_parse(HotStuffCore *hsc) {
-    blame.hsc = hsc;
-    serialized >> blame;
-}
-
-const opcode_t MsgBlameNotify::opcode;
-MsgBlameNotify::MsgBlameNotify(const BlameNotify &bn) { serialized << bn; }
-void MsgBlameNotify::postponed_parse(HotStuffCore *hsc) {
-    bn.hsc = hsc;
-    serialized >> bn;
-}
 
 const opcode_t MsgReqBlock::opcode;
 MsgReqBlock::MsgReqBlock(const std::vector<uint256_t> &blk_hashes) {
@@ -103,6 +90,34 @@ void MsgQC::postponed_parse(HotStuffCore *hsc) {
     serialized >> qc;
 }
 
+const opcode_t MsgAck::opcode;
+MsgAck::MsgAck(const Ack &ack) { serialized << ack; }
+void MsgAck::postponed_parse(HotStuffCore *hsc) {
+    ack.hsc = hsc;
+    serialized >> ack;
+}
+
+const opcode_t MsgShare::opcode;
+MsgShare::MsgShare(const Share &share) { serialized << share; }
+void MsgShare::postponed_parse(HotStuffCore *hsc) {
+    share.hsc = hsc;
+    serialized >> share;
+}
+
+const opcode_t MsgEcho::opcode;
+MsgEcho::MsgEcho(const Echo &echo) { serialized << echo; }
+void MsgEcho::postponed_parse(HotStuffCore *hsc) {
+    echo.hsc = hsc;
+    serialized >> echo;
+}
+
+const opcode_t MsgEcho2::opcode;
+MsgEcho2::MsgEcho2(const Echo &echo) { serialized << echo; }
+void MsgEcho2::postponed_parse(HotStuffCore *hsc) {
+    echo.hsc = hsc;
+    serialized >> echo;
+}
+
 // TODO: improve this function
 void HotStuffBase::exec_command(uint256_t cmd_hash, commit_cb_t callback) {
     cmd_pending.enqueue(std::make_pair(cmd_hash, callback));
@@ -131,6 +146,10 @@ void HotStuffBase::on_deliver_blk(const block_t &blk) {
     /* sanity check: all parents must be delivered */
     for (const auto &p: blk->get_parent_hashes())
         assert(storage->is_blk_delivered(p));
+
+    if(blk->is_delivered())
+        return;
+
     if ((valid = HotStuffCore::on_deliver_blk(blk)))
     {
         LOG_DEBUG("block %.10s delivered",
@@ -253,51 +272,95 @@ void HotStuffBase::vote_handler(MsgVote &&msg, const Net::conn_t &conn) {
     });
 }
 
-void HotStuffBase::notify_handler(MsgNotify &&msg, const Net::conn_t &conn) {
+void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
-    RcObj<Notify> n(new Notify(std::move(msg.notify)));
+
+    RcObj<Ack> v(new Ack(std::move(msg.ack)));
     promise::all(std::vector<promise_t>{
-        async_deliver_blk(n->blk_hash, peer),
-        n->verify(vpool)
-    }).then([this, n, peer](const promise::values_t values) {
+            async_deliver_blk(v->blk_hash, peer),
+            v->verify(vpool),
+            async_wait_enter_view(v->view),
+    }).then([this, v=std::move(v)](const promise::values_t values) {
         if (!promise::any_cast<bool>(values[1]))
-            LOG_WARN("invalid notify message from %s", std::string(peer).c_str());
+            LOG_WARN("invalid ack from %d", v->voter);
         else
-            on_receive_notify(*n);
+            on_receive_ack(*v);
     });
 }
 
-void HotStuffBase::blame_handler(MsgBlame &&msg, const Net::conn_t &conn) {
+void HotStuffBase::share_handler(MsgShare &&msg, const Net::conn_t &conn) {
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
-    RcObj<Blame> b(new Blame(std::move(msg.blame)));
-    b->verify(vpool).then([this, b, peer](bool result) {
-        if (!result)
-            LOG_WARN("invalid blame message from %s", std::string(peer).c_str());
-        else
-            on_receive_blame(*b);
-    });
-}
+    RcObj<Share> v(new Share(std::move(msg.share)));
 
-void HotStuffBase::blamenotify_handler(MsgBlameNotify &&msg, const Net::conn_t &conn) {
-    const NetAddr &peer = conn->get_peer_addr();
-    if (peer.is_null()) return;
-    msg.postponed_parse(this);
-    RcObj<BlameNotify> bn(new BlameNotify(std::move(msg.bn)));
     promise::all(std::vector<promise_t>{
-        async_deliver_blk(bn->hqc_hash, peer),
-        bn->verify(vpool)
-    }).then([this, bn, peer](promise::values_t values) {
-        auto result = promise::any_cast<bool>(values[1]);
-        if (!result)
-            LOG_WARN("invalid blamenotify message from %s", std::string(peer).c_str());
-        else
-            on_receive_blamenotify(*bn);
+        // Todo: verify signature
+//            v->verify(vpool),
+            async_wait_enter_view(v->view),
+            async_wait_deliver_proposal(v->view),
+            async_wait_view_qc(v->view),
+    }).then([this, v=std::move(v)](const promise::values_t values) {
+//        if (!promise::any_cast<bool>(values[0]))
+//                    LOG_WARN("invalid share from %d", v->replicaId);
+//        else
+            on_receive_share(*v);
     });
 }
+
+void HotStuffBase::status_handler(MsgStatus &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<Status> n(new Status(std::move(msg.status)));
+    promise::all(std::vector<promise_t>{
+        n->verify(vpool),
+        async_wait_enter_view(n->view),
+    }).then([this, n, peer](const promise::values_t values) {
+        if (!promise::any_cast<bool>(values[0]))
+            LOG_WARN("invalid status message from %s", std::string(peer).c_str());
+        else
+            process_status(*n);
+    });
+}
+
+
+void HotStuffBase::echo_handler(MsgEcho &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<Echo> e(new Echo(std::move(msg.echo)));
+    promise::all(std::vector<promise_t>{
+            async_wait_enter_view(e->view),
+            e->verify(vpool),
+    }).then([this, e, peer](const promise::values_t values) {
+        if (!promise::any_cast<bool>(values[1]))
+            LOG_WARN("invalid status message from %s", std::string(peer).c_str());
+        else
+            on_receive_proposal_echo(*e);
+    });
+}
+
+
+void HotStuffBase::echo2_handler(MsgEcho2 &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<Echo> e(new Echo(std::move(msg.echo)));
+    promise::all(std::vector<promise_t>{
+//            e->verify(vpool),
+            async_wait_enter_view(e->view),
+            async_wait_deliver_proposal(e->view),
+    }).then([this, e, peer](const promise::values_t values) {
+//        if (!promise::any_cast<bool>(values[0]))
+//            LOG_WARN("invalid status message from %s", std::string(peer).c_str());
+//        else
+        on_receive_cert_echo(*e);
+    });
+}
+
 
 void HotStuffBase::qc_handler(MsgQC &&msg, const Net::conn_t &conn) {
     const NetAddr &peer = conn->get_peer_addr();
@@ -309,6 +372,18 @@ void HotStuffBase::qc_handler(MsgQC &&msg, const Net::conn_t &conn) {
             qc->verify(vpool)
     }).then([this, qc](const promise::values_t values) {
         on_receive_qc(qc->qc);
+    });
+}
+
+void HotStuffBase::block_fetched(const block_t &blk, ReplicaID replicaId) {
+    on_fetch_blk(blk);
+    std::vector<promise_t> pms;
+    for (const auto &phash: blk->get_parent_hashes())
+        pms.push_back(async_deliver_blk(phash, get_config().get_addr(replicaId)));
+    if (blk != get_genesis())
+        pms.push_back(blk->verify(get_config(), vpool));
+    promise::all(pms).then([this, blk]() {
+        on_deliver_blk(blk);
     });
 }
 
@@ -334,16 +409,17 @@ void HotStuffBase::stop_commit_timer_all() {
     commit_timers.clear();
 }
 
-void HotStuffBase::set_blame_timer(double t_sec) {
-    blame_timer = TimerEvent(ec, [this](TimerEvent &) {
-        on_blame_timeout();
-        stop_blame_timer();
+void HotStuffBase::set_propose_timer(double t_sec) {
+    propose_timer = TimerEvent(ec, [this](TimerEvent &) {
+//        on_propose_timeout();
+        do_propose();
+        stop_propose_timer();
     });
-    blame_timer.add(t_sec);
+    propose_timer.add(t_sec);
 }
 
-void HotStuffBase::stop_blame_timer() {
-    blame_timer.clear();
+void HotStuffBase::stop_propose_timer() {
+    propose_timer.clear();
 }
 
 void HotStuffBase::set_viewtrans_timer(double t_sec) {
@@ -500,13 +576,15 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     /* register the handlers for msg from replicas */
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::propose_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::vote_handler, this, _1, _2));
-    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::notify_handler, this, _1, _2));
-    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::blame_handler, this, _1, _2));
-    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::blamenotify_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::status_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::req_blk_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::resp_blk_handler, this, _1, _2));
     pn.reg_conn_handler(salticidae::generic_bind(&HotStuffBase::conn_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::qc_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::ack_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::share_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo2_handler, this, _1, _2));
     pn.start();
     pn.listen(listen_addr);
 }
@@ -525,56 +603,21 @@ void HotStuffBase::do_decide(Finality &&fin) {
     }
 }
 
-void HotStuffBase::do_notify(const Notify &notify) {
-    MsgNotify m(notify);
+void HotStuffBase::do_status(const Status &status) {
+    MsgStatus m(status);
     ReplicaID next_proposer = pmaker->get_proposer();
     if (next_proposer != get_id())
         pn.send_msg(m, get_config().get_addr(next_proposer));
     else
-        on_receive_notify(notify);
+        on_receive_status(status);
 }
 
-void HotStuffBase::update_proposed_cmds(const block_t &blk) {
-    auto cmds = blk->get_cmds();
-    for (size_t i = 0; i < cmds.size(); i++)
-        proposed_cmds.insert(cmds[i]);
-}
 
 void HotStuffBase::enter_view(const uint32_t _view) {
     HOTSTUFF_LOG_PROTO("entering view %d", _view);
     pmaker->enter_view(_view);
 }
 
-std::vector<uint256_t> HotStuffBase::fetch_cmds() {
-    std::vector<uint256_t> cmds;
-    uint32_t cmd_pending_size = cmd_pending_buffer.size();
-    for (uint32_t i = 0; i < cmd_pending_size; i++) {
-        auto ch = cmd_pending_buffer.front();
-        if (proposed_cmds.find(ch) == proposed_cmds.end()) {
-            cmds.push_back(ch);
-        }
-        cmd_pending_buffer.pop();
-        if (cmds.size() >= blk_size){
-            break;
-        }
-    }
-    return std::move(cmds);
-}
-
-void HotStuffBase::early_propose(uint32_t _view, const block_t &blk) {
-    if(id != (_view) % get_config().nreplicas) return;
-
-        auto cmds = fetch_cmds();
-//        if (cmds.size() < blk_size) return;
-        auto proposer = pmaker->get_proposer();
-        if (proposed_view >= get_view()) return;
-        pm_qc_manual.reject();
-        (pm_qc_manual = async_qc_finish(blk)).then([this, cmds=std::move(cmds)](){
-            if (proposed_view >= get_view()) return;
-            proposed_view = get_view();
-            on_propose(cmds, pmaker->get_parents());
-        });
-}
 
 HotStuffBase::~HotStuffBase() {}
 
@@ -595,7 +638,7 @@ void HotStuffBase::start(
 
     /* ((n - 1) + 1 - 1) / 2 */
     uint32_t nfaulty = peers.size() / 2;
-    proposed_view = 0;
+    last_proposed_view = 0;
     if (nfaulty == 0)
         LOG_WARN("too few replicas in the system to tolerate any failure");
     on_init(nfaulty, delta);
@@ -622,13 +665,19 @@ void HotStuffBase::start(
             else
                 e.second(Finality(id, 0, 0, 0, cmd_hash, uint256_t()));
             if (proposer != get_id()) continue;
-            if (proposed_view >= get_view()) continue;
+            if (last_proposed_view >= get_view()) continue;
             if(cmd_pending_buffer.size() >= blk_size){
-                auto cmds = fetch_cmds();
+//                auto cmds = std::vector<uint256_t>{};
+                std::vector<uint256_t> cmds;
+                DataStream s;
+                s << 0;
+                for(int i=0; i< 100; i++)
+                    cmds.push_back(s.get_hash());
+
                 pmaker->beat().then([this, cmds=std::move(cmds)](ReplicaID proposer) {
                     if (proposer == get_id()) {
-                        if (proposed_view >= get_view()) return;
-                        proposed_view = get_view();
+                        if (last_proposed_view >= get_view()) return;
+                        last_proposed_view = get_view();
                         on_propose(cmds, pmaker->get_parents());
                     }
                 });
@@ -649,6 +698,45 @@ void HotStuffBase::start(
         }
         return false;
     });
+}
+
+
+void HotStuffBase::schedule_propose(double t_sec) {
+    ReplicaID proposer = pmaker->get_proposer();
+    if(proposer != id) return;
+    set_propose_timer(t_sec);
+}
+
+
+void HotStuffBase::do_propose(){
+    ReplicaID proposer = pmaker->get_proposer();
+    if(proposer != id || last_proposed_view >= get_view()) return;
+    stop_propose_timer();
+    last_proposed_view = get_view();
+    on_propose(std::vector<uint256_t >{}, pmaker->get_parents());
+}
+
+void HotStuffBase::process_status(Status &status){
+    //Todo: process PVSS part here.
+    uint32_t _view = get_view();
+    if (last_proposed_view >= _view)
+        return;
+
+    size_t nmajority = get_config().nmajority;
+
+    size_t qsize = status_received[status.view].size();
+    if (!status_received[status.view].insert(status.replicaID).second)
+    {
+        LOG_WARN("duplicate status for view %d from %d", status.view, status.replicaID);
+        return;
+    }
+
+    on_receive_status(status);
+    bool is_hqc = get_hqc_qc()->get_view() + 1 == _view;
+
+    if (qsize + 1 >= nmajority && is_hqc) {
+        do_propose();
+    }
 }
 
 }

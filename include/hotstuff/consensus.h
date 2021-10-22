@@ -26,16 +26,21 @@
 #include "hotstuff/type.h"
 #include "hotstuff/entity.h"
 #include "hotstuff/crypto.h"
+#include "erasure.h"
+#include "merklecpp.h"
 
 namespace hotstuff {
 
 struct Proposal;
 struct Vote;
-struct Notify;
+struct Status;
 struct Blame;
 struct BlameNotify;
 struct Finality;
 struct QC;
+struct Ack;
+struct Share;
+struct Echo;
 
 /** Abstraction for HotStuff protocol state machine (without network implementation). */
 class HotStuffCore {
@@ -66,8 +71,9 @@ class HotStuffCore {
     promise_t receive_proposal_waiting;
     promise_t hqc_update_waiting;
     promise_t view_change_waiting;
-    promise_t view_trans_waiting;
     std::unordered_map<uint32_t, promise_t> view_waiting;
+    std::unordered_map<uint32_t, promise_t> view_qc_waiting;
+    std::unordered_map<uint32_t, promise_t> view_proposal_waiting;
 
     /* == feature switches == */
     /** always vote negatively, useful for some PaceMakers */
@@ -82,11 +88,27 @@ class HotStuffCore {
     void on_propose_(const Proposal &prop);
     void on_receive_proposal_(const Proposal &prop);
     void on_view_change();
-    void on_view_trans();
     void on_enter_view(const uint32_t _view);
-    void _vote(const block_t &blk);
-    void _blame();
-    void _new_view();
+    void on_receive_qc_(const uint32_t _view);
+    void on_receive_view_proposal_(const uint32_t _view);
+    void _vote(const block_t &blk, ReplicaID dest);
+    void _ack(const block_t &blk);
+    void _deliver_proposal(const Proposal &prop);
+    void _deliver_cert(const quorum_cert_bt &qc);
+    void _broadcast_share(uint32_t view);
+
+    std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> view_shares;
+
+    uint32_t last_propose_delivered_view;
+    uint32_t last_cert_delivered_view;
+    uint32_t last_propose_decoded_view;
+    uint32_t last_cert_decoded_view;
+    uint32_t last_view_proposal_received;
+    uint32_t last_view_cert_received;
+
+    /* Erasure Coded Proposal Chunks by view */
+    std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> prop_chunks;
+    std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> qc_chunks;
 
     protected:
     ReplicaID id;                  /**< identity of the replica itself */
@@ -122,14 +144,16 @@ class HotStuffCore {
     /** Call upon the delivery of a vote message.
      * The block mentioned in the message should be already delivered. */
     void on_receive_vote(const Vote &vote);
-    void on_receive_notify(const Notify &notify);
-    void on_receive_blame(const Blame &blame);
-    void on_receive_blamenotify(const BlameNotify &blame);
+    void on_receive_status(const Status &status);
     void on_commit_timeout(const block_t &blk);
-    void on_blame_timeout();
+    void on_propose_timeout();
     void on_viewtrans_timeout();
 
     void on_receive_qc(const quorum_cert_bt &qc);
+    void on_receive_ack(const Ack &ack);
+    void on_receive_share(const Share &share);
+    void on_receive_proposal_echo(const Echo &echo);
+    void on_receive_cert_echo(const Echo &echo);
 
     /** Call to submit new commands to be decided (executed). "Parents" must
      * contain at least one block, and the first block is the actual parent,
@@ -137,6 +161,7 @@ class HotStuffCore {
     block_t on_propose(const std::vector<uint256_t> &cmds,
                     const std::vector<block_t> &parents,
                     bytearray_t &&extra = bytearray_t());
+
 
     /* Functions required to construct concrete instances for abstract classes.
      * */
@@ -153,22 +178,28 @@ class HotStuffCore {
      * itself. */
     virtual void do_broadcast_proposal(const Proposal &prop) = 0;
     virtual void do_broadcast_vote(const Vote &vote) = 0;
-    virtual void do_broadcast_blame(const Blame &blame) = 0;
-    virtual void do_broadcast_blamenotify(const BlameNotify &bn) = 0;
-    virtual void do_notify(const Notify &notify) = 0;
     virtual void set_commit_timer(const block_t &blk, double t_sec) = 0;
-    virtual void set_blame_timer(double t_sec) = 0;
+    virtual void set_propose_timer(double t_sec) = 0;
     virtual void stop_commit_timer(uint32_t height) = 0;
     virtual void stop_commit_timer_all() = 0;
-    virtual void stop_blame_timer() = 0;
+    virtual void stop_propose_timer() = 0;
     virtual void set_viewtrans_timer(double t_sec) = 0;
     virtual void stop_viewtrans_timer() = 0;
 
     virtual void do_broadcast_qc(const QC &qc) = 0;
 
     virtual void enter_view(uint32_t _view) = 0;
-    virtual void update_proposed_cmds(const block_t &blk) = 0;
-    virtual void early_propose(uint32_t _view, const block_t &blk) = 0;
+    virtual void do_vote(const Vote &vote, ReplicaID dest) = 0;
+    virtual void do_broadcast_ack(const Ack &ack) = 0;
+    virtual void do_broadcast_share(const Share &share) = 0;
+    virtual void do_status(const Status &status) = 0;
+    virtual void do_broadcast_echo(const Echo &echo) = 0;
+    virtual void do_echo(const Echo &echo, ReplicaID dest) = 0;
+    virtual void do_broadcast_echo2(const Echo &echo) = 0;
+    virtual void do_echo2(const Echo &echo, ReplicaID dest) = 0;
+
+    virtual void schedule_propose(double t_sec) = 0;
+    virtual void block_fetched(const block_t &blk, ReplicaID replicaId) = 0;
 
     /* The user plugs in the detailed instances for those
      * polymorphic data types. */
@@ -204,13 +235,16 @@ class HotStuffCore {
     /** Get a promise resolved after a view change. */
     promise_t async_wait_view_change();
     /** Get a promise resolved before a view change. */
-    promise_t async_wait_view_trans();
 
+
+    promise_t async_wait_deliver_proposal(const uint32_t _view);
     promise_t async_wait_enter_view(const uint32_t _view);
+    promise_t async_wait_view_qc(const uint32_t _view);
 
     /* Other useful functions */
     const block_t &get_genesis() { return b0; }
     const block_t &get_hqc() { return hqc.first; }
+    const quorum_cert_bt &get_hqc_qc() {return hqc.second; }
     const ReplicaConfig &get_config() { return config; }
     ReplicaID get_id() const { return id; }
     const std::set<block_t, BlockHeightCmp> get_tails() const { return tails; }
@@ -264,6 +298,7 @@ struct Proposal: public Serializable {
           << "view=" << std::to_string(view) << ">";
         return std::move(s);
     }
+
 };
 
 /** Abstraction for vote messages. */
@@ -338,52 +373,55 @@ struct Vote: public Serializable {
     }
 };
 
-struct Notify: public Serializable {
-    uint256_t blk_hash;
+struct Status: public Serializable {
+    ReplicaID replicaID;
+    uint32_t view;
     quorum_cert_bt qc;
-    
+
+    // Todo: add PVSS vector
+
     /** handle of the core object to allow polymorphism */
     HotStuffCore *hsc;
 
-    Notify(): qc(nullptr), hsc(nullptr) {}
-    Notify(const uint256_t blk_hash,
-           quorum_cert_bt &&qc,
-           HotStuffCore *hsc):
-        blk_hash(blk_hash),
-        qc(std::move(qc)), hsc(hsc) {}
+    Status(): qc(nullptr), hsc(nullptr) {}
+    Status(ReplicaID replicaID, quorum_cert_bt &&qc,
+           uint32_t view, HotStuffCore *hsc):
+        replicaID(replicaID), qc(std::move(qc)), view(view), hsc(hsc) {}
 
-    Notify(const Notify &other):
-        blk_hash(other.blk_hash),
-        qc(other.qc ? other.qc->clone() : nullptr), hsc(other.hsc) {}
+    Status(const Status &other):
+        replicaID(replicaID),
+        qc(other.qc ? other.qc->clone() : nullptr),
+        view(other.view), hsc(other.hsc) {}
 
-    Notify(Notify &&other) = default;
+    Status(Status &&other) = default;
     
     void serialize(DataStream &s) const override {
-        s << blk_hash << *qc;
+        s << view << replicaID << *qc;
     }
 
     void unserialize(DataStream &s) override {
-        s >> blk_hash;
+        s >> view;
+        s >> replicaID;
         qc = hsc->parse_quorum_cert(s);
     }
 
     bool verify() const {
         assert(hsc != nullptr);
-        return qc->verify(hsc->get_config()) &&
-            qc->get_obj_hash() == Vote::proof_obj_hash(blk_hash);
+        return qc->verify(hsc->get_config());
     }
 
     promise_t verify(VeriPool &vpool) const {
         assert(hsc != nullptr);
         return qc->verify(hsc->get_config(), vpool).then([this](bool result) {
-            return result && qc->get_obj_hash() == Vote::proof_obj_hash(blk_hash);
+            return result;
         });
     }
 
     operator std::string () const {
         DataStream s;
-        s << "<notify "
-          << "blk=" << get_hex10(blk_hash) << ">";
+        s << "<status "
+          << "rid=" << std::to_string(replicaID) << " "
+          << "view=" << std::to_string(view) << ">";
         return std::move(s);
     }
 };
@@ -552,10 +590,9 @@ struct QC: public Serializable {
         assert(hsc != nullptr);
 
         // skip verification of qc from old views.
-        if (qc->get_view() <= hsc->get_view()){
-            promise_t pm;
-            return pm.then([]{ return true;});
-        }
+        if (qc->get_view() < hsc->get_view())
+            return promise_t([](promise_t &pm) { pm.resolve(true); });
+
         return qc->verify(hsc->get_config(), vpool).then([this](bool result) {
             return result;
         });
@@ -613,6 +650,246 @@ struct Finality: public Serializable {
         return std::move(s);
     }
 };
+
+/** Abstraction for ack messages. */
+struct Ack: public Serializable {
+    ReplicaID voter;
+    /** block being acked */
+    uint256_t blk_hash;
+    /** proof of validity for the ack */
+    part_cert_bt cert;
+
+    uint32_t view;
+
+    /** handle of the core object to allow polymorphism */
+    HotStuffCore *hsc;
+
+    Ack(): cert(nullptr), hsc(nullptr) {}
+    Ack(ReplicaID voter,
+         const uint256_t &blk_hash,
+         part_cert_bt &&cert,
+         const uint32_t &view,
+         HotStuffCore *hsc):
+            voter(voter),
+            blk_hash(blk_hash),
+            cert(std::move(cert)),
+            view(view), hsc(hsc) {}
+
+    Ack(const Ack &other):
+            voter(other.voter),
+            blk_hash(other.blk_hash),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            view(other.view),
+            hsc(other.hsc) {}
+
+    Ack(Ack &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << voter << blk_hash << view << *cert;
+    }
+
+    void unserialize(DataStream &s) override {
+        assert(hsc != nullptr);
+        s >> voter >> blk_hash >> view;
+        cert = hsc->parse_part_cert(s);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &blk_hash) {
+//        DataStream p;
+//        p << blk_hash;
+        return blk_hash;
+    }
+
+    bool verify() const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(voter)) &&
+               cert->get_obj_hash() == proof_obj_hash(blk_hash);
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(voter), vpool).then([this](bool result) {
+            return result && cert->get_obj_hash() == proof_obj_hash(blk_hash);
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<ack "
+          << "rid=" << std::to_string(voter) << " "
+          << "blk=" << get_hex10(blk_hash) << " "
+          << "view=" << std::to_string(view) << ">";
+        return std::move(s);
+    }
+};
+
+
+/** Abstraction for share messages to send secret shares. */
+struct Share: public Serializable {
+    ReplicaID replicaId;
+    /** proof of validity for the share */
+    part_cert_bt cert;
+
+    uint32_t view;
+
+    /** handle of the core object to allow polymorphism */
+    HotStuffCore *hsc;
+
+    Share(): cert(nullptr), hsc(nullptr) {}
+    Share(ReplicaID replicaId,
+        part_cert_bt &&cert,
+        const uint32_t &view,
+        HotStuffCore *hsc):
+            replicaId(replicaId),
+            cert(std::move(cert)),
+            view(view), hsc(hsc) {}
+
+    Share(const Share &other):
+            replicaId(other.replicaId),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            view(other.view),
+            hsc(other.hsc) {}
+
+    Share(Share &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << replicaId << view << *cert;
+    }
+
+    void unserialize(DataStream &s) override {
+        assert(hsc != nullptr);
+        s >> replicaId >> view;
+        cert = hsc->parse_part_cert(s);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &blk_hash) {
+//        DataStream p;
+//        p << blk_hash;
+        return blk_hash;
+    }
+
+    bool verify() const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(replicaId));
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(replicaId), vpool).then([this](bool result) {
+            return result;
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<share "
+          << "rid=" << std::to_string(replicaId) << " "
+          << "view=" << std::to_string(view) << ">";
+        return std::move(s);
+    }
+};
+
+
+struct Echo: public Serializable {
+    ReplicaID replicaID;
+    uint32_t idx;
+    uint32_t view;
+    uint32_t mtype;
+    uint256_t merkle_root;
+    bytearray_t merkle_proof;
+
+    part_cert_bt cert;
+    /** chunk being proposed */
+    chunk_t chunk;
+
+    HotStuffCore *hsc;
+
+    Echo(): chunk(nullptr), hsc(nullptr) {}
+    Echo(ReplicaID replicaID,
+         uint32_t idx,
+         uint32_t view,
+         uint32_t mtype,
+         uint256_t merkle_root,
+        bytearray_t merkle_proof,
+         const chunk_t &chunk,
+         part_cert_bt &&cert,
+         HotStuffCore *hsc):
+            replicaID(replicaID),
+            idx(idx), view(view),
+            mtype(mtype),
+            merkle_root(merkle_root),
+            merkle_proof(merkle_proof),
+            chunk(chunk),
+            cert(std::move(cert)),
+            hsc(hsc){}
+
+    Echo(const Echo &other):
+            replicaID(other.replicaID),
+            idx(other.idx),
+            view(other.view),
+            mtype(other.mtype),
+            merkle_root(other.merkle_root),
+            merkle_proof(other.merkle_proof),
+            chunk(other.chunk),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            hsc(other.hsc){}
+
+    void serialize(DataStream &s) const override {
+        s << replicaID << idx << view << mtype << merkle_root;
+        s << htole((uint32_t)merkle_proof.size()) << merkle_proof;
+        s << *chunk << *cert;
+    }
+
+    inline void unserialize(DataStream &s) override {
+        s >> replicaID;
+        s >> idx;
+        s >> view;
+        s >> mtype;
+        s >> merkle_root;
+
+        uint32_t n;
+        s >> n;
+        n = letoh(n);
+        if (n == 0){
+            merkle_proof.clear();
+        }else{
+            auto base = s.get_data_inplace(n);
+            merkle_proof = bytearray_t(base, base+n);
+        }
+        Chunk _chunk;
+        s >> _chunk;
+        chunk = new Chunk(std::move(_chunk));
+        cert = hsc->parse_part_cert(s);
+    }
+
+
+    bool verify() const {
+        merkle::Hash root(merkle_root);
+        merkle::Path path(merkle_proof);
+
+        return path.verify(root);
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(replicaID), vpool).then([this](bool result) {
+            return result && cert->get_obj_hash() == merkle_root; //  &&verify();
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<echo "
+          << "rid=" << std::to_string(replicaID) << " "
+          << "idx=" << std::to_string(idx) << " "
+          << "view=" << std::to_string(view) << " "
+          << "mtype=" << std::to_string(mtype) << " "
+          << "hash=" << get_hex10(merkle_root) << ">";
+        return std::move(s);
+    }
+};
+
+
 
 }
 
