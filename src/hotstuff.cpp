@@ -713,13 +713,15 @@ void HotStuffBase::do_propose(){
     if(proposer != id || last_proposed_view >= get_view()) return;
     stop_propose_timer();
     last_proposed_view = get_view();
+
+    // Todo: add PVSS vector to proposal.
     on_propose(std::vector<uint256_t >{}, pmaker->get_parents());
 }
 
 void HotStuffBase::process_status(Status &status){
     //Todo: process PVSS part here.
     uint32_t _view = get_view();
-    if (last_proposed_view >= _view)
+    if(status.view < _view || last_proposed_view >= _view)
         return;
 
     size_t nmajority = get_config().nmajority;

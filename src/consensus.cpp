@@ -436,10 +436,15 @@ void HotStuffCore::on_receive_proposal_echo(const Echo &echo){
     size_t qsize = prop_chunks[_view].size();
     if (qsize > config.nreconthres) return;
 
-    /*Todo: verify chunk*/
     if (!prop_chunks[_view][echo.idx]) {
-        prop_chunks[_view][echo.idx] = echo.chunk;
-        qsize++;
+        bytearray_t bt(echo.merkle_root);
+        merkle::Hash root(bt);
+        merkle::Path path(echo.merkle_proof);
+
+        if (path.verify(root)) {
+            prop_chunks[_view][echo.idx] = echo.chunk;
+            qsize++;
+        }
     }
 
     unsigned long chunksize = echo.chunk->get_data().size();
@@ -482,10 +487,15 @@ void HotStuffCore::on_receive_cert_echo(const Echo &echo){
     size_t qsize = qc_chunks[_view].size();
     if (qsize > config.nreconthres) return;
 
-    /*Todo: verify chunk*/
     if (!qc_chunks[_view][echo.idx]) {
-        qc_chunks[_view][echo.idx] = echo.chunk;
-        qsize++;
+        bytearray_t bt(echo.merkle_root);
+        merkle::Hash root(bt);
+        merkle::Path path(echo.merkle_proof);
+
+        if (path.verify(root)) {
+            qc_chunks[_view][echo.idx] = echo.chunk;
+            qsize++;
+        }
     }
 
     unsigned long chunksize = echo.chunk->get_data().size();
@@ -508,12 +518,8 @@ void HotStuffCore::on_receive_cert_echo(const Echo &echo){
         DataStream d;
         Erasure::decode((int)config.nreconthres, (int)(config.nreplicas - config.nreconthres), 8, arr, erasures, d);
         quorum_cert_bt qc = parse_quorum_cert(d);
-        try {
-            on_receive_qc(qc);
-        } catch (exception &e) {
-            LOG_INFO("Exception %d", last_view_proposal_received);
-            throw e;
-        }
+
+        on_receive_qc(qc);
         qc_chunks.erase(_view);
     }
 }
