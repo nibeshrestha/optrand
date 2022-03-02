@@ -288,6 +288,7 @@ void HotStuffCore::on_receive_qc(const quorum_cert_bt &qc){
     //
     on_receive_qc_(view);
     _ack(blk);
+    _try_enter_view();
 }
 
 void HotStuffCore::on_receive_ack(const Ack &ack) {
@@ -348,12 +349,18 @@ void HotStuffCore::on_receive_share(const Share &share){
         LOG_WARN("duplicate share for %d from %d", view, share.replicaId);
         return;
     }
-    if (qsize + 1 == config.nmajority)
-    {
+    if (qsize + 1 == config.nmajority){
+        //Todo: reconstruct the secret and broadcast it.
+        last_view_shares_received = view;
+        _try_enter_view();
+    }
+}
+
+void HotStuffCore::_try_enter_view() {
+    if(last_view_shares_received == view && last_view_cert_received == view) {
         view += 1;
         enter_view(view);
         on_enter_view(view);
-        //Todo: reconstruct the secret and broadcast it.
     }
 }
 
@@ -560,11 +567,12 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     hqc = std::make_pair(b0, b0->qc->clone());
     view = 1;
     last_propose_delivered_view = 0;
-    last_cert_delivered_view = 0;
     last_propose_decoded_view = 0;
     last_cert_decoded_view = 0;
     last_view_proposal_received = 0;
     last_view_cert_received = 0;
+    last_view_shares_received = 0;
+    last_cert_delivered_view = 0;
 }
 
 void HotStuffCore::prune(uint32_t staleness) {

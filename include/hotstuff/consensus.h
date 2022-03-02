@@ -96,16 +96,17 @@ class HotStuffCore {
     void _deliver_proposal(const Proposal &prop);
     void _deliver_cert(const quorum_cert_bt &qc);
     void _broadcast_share(uint32_t view);
+    void _try_enter_view();
 
     std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> view_shares;
 
     uint32_t last_propose_delivered_view;
-    uint32_t last_cert_delivered_view;
     uint32_t last_propose_decoded_view;
     uint32_t last_cert_decoded_view;
     uint32_t last_view_proposal_received;
     uint32_t last_view_cert_received;
-
+    uint32_t last_view_shares_received;
+    uint32_t last_cert_delivered_view;
     /* Erasure Coded Proposal Chunks by view */
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> prop_chunks;
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> qc_chunks;
