@@ -38,7 +38,6 @@ struct Blame;
 struct BlameNotify;
 struct Finality;
 struct QC;
-struct Ack;
 struct Share;
 struct Echo;
 
@@ -74,6 +73,7 @@ class HotStuffCore {
     std::unordered_map<uint32_t, promise_t> view_waiting;
     std::unordered_map<uint32_t, promise_t> view_qc_waiting;
     std::unordered_map<uint32_t, promise_t> view_proposal_waiting;
+    std::unordered_map<uint32_t, block_t> view_proposals;
 
     /* == feature switches == */
     /** always vote negatively, useful for some PaceMakers */
@@ -92,11 +92,10 @@ class HotStuffCore {
     void on_receive_qc_(const uint32_t _view);
     void on_receive_view_proposal_(const uint32_t _view);
     void _vote(const block_t &blk, ReplicaID dest);
-    void _ack(const block_t &blk);
     void _deliver_proposal(const Proposal &prop);
     void _deliver_cert(const quorum_cert_bt &qc);
     void _broadcast_share(uint32_t view);
-    void _try_enter_view();
+    void _enter_view();
 
     std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> view_shares;
 
@@ -107,6 +106,7 @@ class HotStuffCore {
     uint32_t last_view_cert_received;
     uint32_t last_view_shares_received;
     uint32_t last_cert_delivered_view;
+    uint32_t qc_received_timeout_view;
     /* Erasure Coded Proposal Chunks by view */
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> prop_chunks;
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> qc_chunks;
@@ -149,9 +149,11 @@ class HotStuffCore {
     void on_commit_timeout(const block_t &blk);
     void on_propose_timeout();
     void on_viewtrans_timeout();
+    void on_view_timeout();
+    void on_vote_timer_timeout(const block_t &blk, ReplicaID dest);
+    void on_qc_receive_timeout(uint32_t view);
 
     void on_receive_qc(const quorum_cert_bt &qc);
-    void on_receive_ack(const Ack &ack);
     void on_receive_share(const Share &share);
     void on_receive_proposal_echo(const Echo &echo);
     void on_receive_cert_echo(const Echo &echo);
@@ -186,12 +188,16 @@ class HotStuffCore {
     virtual void stop_propose_timer() = 0;
     virtual void set_viewtrans_timer(double t_sec) = 0;
     virtual void stop_viewtrans_timer() = 0;
+    virtual void set_view_timer(double t_sec) =0;
+    virtual void set_vote_timer(const block_t &blk, ReplicaID dest, double t_sec) = 0;
+    virtual void stop_vote_timer() = 0;
+    virtual void set_qc_receive_timer(uint32_t view, double t_sec) = 0;
+
 
     virtual void do_broadcast_qc(const QC &qc) = 0;
 
     virtual void enter_view(uint32_t _view) = 0;
     virtual void do_vote(const Vote &vote, ReplicaID dest) = 0;
-    virtual void do_broadcast_ack(const Ack &ack) = 0;
     virtual void do_broadcast_share(const Share &share) = 0;
     virtual void do_status(const Status &status) = 0;
     virtual void do_broadcast_echo(const Echo &echo) = 0;
@@ -648,78 +654,6 @@ struct Finality: public Serializable {
           << "cmd_height=" << std::to_string(cmd_height) << " "
           << "cmd=" << get_hex10(cmd_hash) << " "
           << "blk=" << get_hex10(blk_hash) << ">";
-        return std::move(s);
-    }
-};
-
-/** Abstraction for ack messages. */
-struct Ack: public Serializable {
-    ReplicaID voter;
-    /** block being acked */
-    uint256_t blk_hash;
-    /** proof of validity for the ack */
-    part_cert_bt cert;
-
-    uint32_t view;
-
-    /** handle of the core object to allow polymorphism */
-    HotStuffCore *hsc;
-
-    Ack(): cert(nullptr), hsc(nullptr) {}
-    Ack(ReplicaID voter,
-         const uint256_t &blk_hash,
-         part_cert_bt &&cert,
-         const uint32_t &view,
-         HotStuffCore *hsc):
-            voter(voter),
-            blk_hash(blk_hash),
-            cert(std::move(cert)),
-            view(view), hsc(hsc) {}
-
-    Ack(const Ack &other):
-            voter(other.voter),
-            blk_hash(other.blk_hash),
-            cert(other.cert ? other.cert->clone() : nullptr),
-            view(other.view),
-            hsc(other.hsc) {}
-
-    Ack(Ack &&other) = default;
-
-    void serialize(DataStream &s) const override {
-        s << voter << blk_hash << view << *cert;
-    }
-
-    void unserialize(DataStream &s) override {
-        assert(hsc != nullptr);
-        s >> voter >> blk_hash >> view;
-        cert = hsc->parse_part_cert(s);
-    }
-
-    static uint256_t proof_obj_hash(const uint256_t &blk_hash) {
-//        DataStream p;
-//        p << blk_hash;
-        return blk_hash;
-    }
-
-    bool verify() const {
-        assert(hsc != nullptr);
-        return cert->verify(hsc->get_config().get_pubkey(voter)) &&
-               cert->get_obj_hash() == proof_obj_hash(blk_hash);
-    }
-
-    promise_t verify(VeriPool &vpool) const {
-        assert(hsc != nullptr);
-        return cert->verify(hsc->get_config().get_pubkey(voter), vpool).then([this](bool result) {
-            return result && cert->get_obj_hash() == proof_obj_hash(blk_hash);
-        });
-    }
-
-    operator std::string () const {
-        DataStream s;
-        s << "<ack "
-          << "rid=" << std::to_string(voter) << " "
-          << "blk=" << get_hex10(blk_hash) << " "
-          << "view=" << std::to_string(view) << ">";
         return std::move(s);
     }
 };

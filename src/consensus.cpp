@@ -114,20 +114,22 @@ void HotStuffCore::check_commit(const block_t &blk) {
         blk->decision = 1;
         do_consensus(blk);
         LOG_PROTO("commit %s", std::string(*blk).c_str());
-        for (size_t i = 0; i < blk->cmds.size(); i++)
-            do_decide(Finality(id, 1, i, blk->height,
-                                blk->cmds[i], blk->get_hash()));
+
+//        for (size_t i = 0; i < blk->cmds.size(); i++)
+//            do_decide(Finality(id, 1, i, blk->height,
+//                                blk->cmds[i], blk->get_hash()));
+
     }
     b_exec = blk;
 }
 
-// 2. Responsive Vote
+
 void HotStuffCore::_vote(const block_t &blk, ReplicaID proposer) {
     const auto &blk_hash = blk->get_hash();
     LOG_PROTO("vote for %s", get_hex10(blk_hash).c_str());
+
     Vote vote(id, blk_hash,
-            create_part_cert(
-                *priv_key, blk_hash, view), view, this);
+            create_part_cert(*priv_key, blk_hash, view), view, this);
 
     if (proposer == id)
         on_receive_vote(vote);
@@ -165,18 +167,32 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     if (bnew->height <= vheight)
         throw std::runtime_error("new block should be higher than vheight");
     vheight = bnew->height;
+
     finished_propose[bnew] = true;
+    view_proposals[view] = bnew;
+
     _vote(bnew, id);
     on_propose_(prop);
     /* boradcast to other replicas */
     do_broadcast_proposal(prop);
     on_receive_view_proposal_(view);
+
+    if (view == 1) {
+        set_view_timer(11 * config.delta);
+        set_qc_receive_timer(view, 8*config.delta);
+    }
+
     return bnew;
 }
 
 void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     if (view_trans) return;
     LOG_PROTO("got %s", std::string(prop).c_str());
+
+    if (view == 1) {
+        set_view_timer(11*config.delta);
+        set_qc_receive_timer(view, 8*config.delta);
+    }
 
     block_t bnew = prop.blk;
     if (finished_propose[bnew]) return;
@@ -214,11 +230,12 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     if (bnew->qc_ref)
         on_qc_finish(bnew->qc_ref);
     finished_propose[bnew] = true;
+    view_proposals[view] = bnew;
 
     on_receive_proposal_(prop);
     on_receive_view_proposal_(view);
     // check if the proposal extends the highest certified block
-    if (opinion && !vote_disabled) _vote(bnew, prop.proposer);
+    if (opinion && !vote_disabled)  set_vote_timer(bnew, prop.proposer, 2*config.delta);
 
     if(last_propose_delivered_view < view) _deliver_proposal(prop);
 
@@ -238,7 +255,7 @@ void HotStuffCore::on_receive_vote(const Vote &vote) {
 //        on_receive_proposal(Proposal((view-1)%config.nreplicas, blk, view, nullptr));
     }
     size_t qsize = blk->voted.size();
-    if (qsize >= config.nresponsive) return;
+    if (qsize >= config.nmajority) return;
     if (!blk->voted.insert(vote.voter).second)
     {
         LOG_WARN("duplicate vote for %s from %d", get_hex10(vote.blk_hash).c_str(), vote.voter);
@@ -250,13 +267,12 @@ void HotStuffCore::on_receive_vote(const Vote &vote) {
         qc = create_quorum_cert(blk->get_hash(), view);
     }
     qc->add_part(vote.voter, *vote.cert);
-    if (qsize + 1 == config.nresponsive)
+    if (qsize + 1 == config.nmajority)
     {
         qc->compute();
         update_hqc(blk, qc);
         on_qc_finish(blk);
         do_broadcast_qc(QC(qc->clone(), this));
-        _ack(blk);
     }
 }
 
@@ -274,8 +290,10 @@ void HotStuffCore::on_receive_status(const Status &status) {
 
 void HotStuffCore::on_receive_qc(const quorum_cert_bt &qc){
     uint32_t _view = qc->get_view();
-    LOG_PROTO("got QC view = %d", _view);
+
     if (_view < view || last_view_cert_received >= view) return;
+
+    LOG_PROTO("got QC view = %d", _view);
     last_view_cert_received = _view;
 
     block_t blk = get_delivered_blk(qc->get_obj_hash());
@@ -284,46 +302,14 @@ void HotStuffCore::on_receive_qc(const quorum_cert_bt &qc){
     blk_qc = qc->clone();
     update_hqc(blk, blk_qc);
 
-    _deliver_cert(qc);
-    //
     on_receive_qc_(view);
-    _ack(blk);
-    _try_enter_view();
-}
 
-void HotStuffCore::on_receive_ack(const Ack &ack) {
-    LOG_PROTO("got %s", std::string(ack).c_str());
-    LOG_PROTO("now state: %s", std::string(*this).c_str());
-    if (ack.view < view) return;
-    block_t blk = get_delivered_blk(ack.blk_hash);
-    assert(ack.cert);
-    if (!finished_propose[blk])
-    {
-//        on_receive_proposal(Proposal((view-1)%config.nreplicas, blk, view, nullptr));
+    if(qc_received_timeout_view >= view){
+        LOG_WARN("timing error");
+    } else if(qc_received_timeout_view + 1 == view){
+        _deliver_cert(qc);
+        set_commit_timer(blk, 2*config.delta);
     }
-    size_t qsize = blk->acked.size();
-    if (qsize >= config.nresponsive) return;
-    if (!blk->acked.insert(ack.voter).second)
-    {
-        LOG_WARN("duplicate ack for %s from %d", get_hex10(ack.blk_hash).c_str(), ack.voter);
-        return;
-    }
-    auto &qc = blk->self_qc;
-
-    if (qsize + 1 == config.nresponsive)
-    {
-        check_commit(blk);
-        _broadcast_share(view);
-    }
-}
-
-void HotStuffCore::_ack(const block_t &blk){
-    const auto &blk_hash = blk->get_hash();
-    LOG_PROTO("ack for %s", get_hex10(blk_hash).c_str());
-    Ack ack(id, blk_hash,create_part_cert(*priv_key, blk_hash, view), view, this);
-
-    on_receive_ack(ack);
-    do_broadcast_ack(ack);
 }
 
 
@@ -335,7 +321,6 @@ void HotStuffCore::_broadcast_share(const uint32_t view){
 
     on_receive_share(share);
     do_broadcast_share(share);
-
 }
 
 void HotStuffCore::on_receive_share(const Share &share){
@@ -352,16 +337,15 @@ void HotStuffCore::on_receive_share(const Share &share){
     if (qsize + 1 == config.nmajority){
         //Todo: reconstruct the secret and broadcast it.
         last_view_shares_received = view;
-        _try_enter_view();
     }
 }
 
-void HotStuffCore::_try_enter_view() {
-    if(last_view_shares_received == view && last_view_cert_received == view) {
-        view += 1;
-        enter_view(view);
-        on_enter_view(view);
-    }
+void HotStuffCore::_enter_view() {
+    view += 1;
+    enter_view(view);
+    set_view_timer(11 * config.delta);
+    set_qc_receive_timer(view, 8*config.delta);
+    on_enter_view(view);
 }
 
 void HotStuffCore::_deliver_proposal(const Proposal &prop) {
@@ -386,7 +370,6 @@ void HotStuffCore::_deliver_proposal(const Proposal &prop) {
         bytearray_t patharr;
         path->serialise(patharr);
         if (i != id) {
-            ;
             Echo echo(id, (uint32_t)i, prop.view, (uint32_t)MessageType::PROPOSAL, hash, patharr, chunk_array[i],
                     create_part_cert(*priv_key, hash, view), this);
             do_echo(echo, (ReplicaID)i);
@@ -538,6 +521,27 @@ void HotStuffCore::on_propose_timeout() {
 //    do_propose();
 }
 
+void HotStuffCore::on_view_timeout() {
+
+    if(view > config.nmajority) {
+        block_t blk = view_proposals[view - config.nmajority];
+        if(blk->decision != 1){
+            //Todo: remove the leader of the block
+        } else{
+            // Todo: fetch the sharing and multicast it.
+        }
+    }
+    _enter_view();
+}
+
+void HotStuffCore::on_vote_timer_timeout(const block_t &blk, ReplicaID dest){
+    _vote(blk, dest);
+}
+
+void HotStuffCore::on_qc_receive_timeout(uint32_t view) {
+    qc_received_timeout_view = view;
+}
+
 void HotStuffCore::on_viewtrans_timeout() {
     // view change
     view++;
@@ -573,6 +577,7 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     last_view_cert_received = 0;
     last_view_shares_received = 0;
     last_cert_delivered_view = 0;
+    qc_received_timeout_view = 0;
 }
 
 void HotStuffCore::prune(uint32_t staleness) {

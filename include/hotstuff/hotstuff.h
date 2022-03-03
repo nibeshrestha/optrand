@@ -96,15 +96,6 @@ struct MsgQC {
     void postponed_parse(HotStuffCore *hsc);
 };
 
-struct MsgAck {
-    static const opcode_t opcode = 0x8;
-    DataStream serialized;
-    Ack ack;
-    MsgAck(const Ack &);
-    MsgAck(DataStream &&s): serialized(std::move(s)) {}
-    void postponed_parse(HotStuffCore *hsc);
-};
-
 struct MsgShare {
     static const opcode_t opcode = 0x9;
     DataStream serialized;
@@ -201,6 +192,9 @@ class HotStuffBase: public HotStuffCore {
     std::unordered_map<uint32_t, TimerEvent> commit_timers;
     TimerEvent propose_timer;
     TimerEvent viewtrans_timer;
+    TimerEvent view_timer;
+    TimerEvent vote_timer;
+    TimerEvent qc_receive_timer;
 
     private:
     /** whether libevent handle is owned by itself */
@@ -278,7 +272,6 @@ class HotStuffBase: public HotStuffCore {
     inline void resp_blk_handler(MsgRespBlock &&, const Net::conn_t &);
 
     inline void qc_handler(MsgQC &&, const Net::conn_t &);
-    inline void ack_handler(MsgAck &&, const Net::conn_t &);
     inline void share_handler(MsgShare &&, const Net::conn_t &);
     inline void echo_handler(MsgEcho &&, const Net::conn_t &);
     inline void echo2_handler(MsgEcho2 &&, const Net::conn_t &);
@@ -324,6 +317,10 @@ class HotStuffBase: public HotStuffCore {
     void stop_propose_timer() override;
     void set_viewtrans_timer(double t_sec) override;
     void stop_viewtrans_timer() override;
+    void set_view_timer(double t_sec) override;
+    void set_vote_timer(const block_t &blk, ReplicaID dest, double t_sec) override;
+    void stop_vote_timer() override;
+    void set_qc_receive_timer(uint32_t view, double t_sec) override;
 
     void do_decide(Finality &&) override;
     void do_consensus(const block_t &blk) override;
@@ -340,10 +337,6 @@ class HotStuffBase: public HotStuffCore {
     void do_vote(const Vote &vote, ReplicaID dest) override {
         pn.send_msg(MsgVote(vote), get_config().get_addr(dest));
      }
-
-    void do_broadcast_ack(const Ack &ack) override {
-        _do_broadcast<Ack, MsgAck>(ack);
-    }
 
     void do_broadcast_share(const Share &share) override {
         _do_broadcast<Share, MsgShare>(share);

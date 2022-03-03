@@ -90,13 +90,6 @@ void MsgQC::postponed_parse(HotStuffCore *hsc) {
     serialized >> qc;
 }
 
-const opcode_t MsgAck::opcode;
-MsgAck::MsgAck(const Ack &ack) { serialized << ack; }
-void MsgAck::postponed_parse(HotStuffCore *hsc) {
-    ack.hsc = hsc;
-    serialized >> ack;
-}
-
 const opcode_t MsgShare::opcode;
 MsgShare::MsgShare(const Share &share) { serialized << share; }
 void MsgShare::postponed_parse(HotStuffCore *hsc) {
@@ -272,24 +265,6 @@ void HotStuffBase::vote_handler(MsgVote &&msg, const Net::conn_t &conn) {
     });
 }
 
-void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
-    const NetAddr &peer = conn->get_peer_addr();
-    if (peer.is_null()) return;
-    msg.postponed_parse(this);
-
-    RcObj<Ack> v(new Ack(std::move(msg.ack)));
-    promise::all(std::vector<promise_t>{
-            async_deliver_blk(v->blk_hash, peer),
-            v->verify(vpool),
-            async_wait_enter_view(v->view),
-    }).then([this, v=std::move(v)](const promise::values_t values) {
-        if (!promise::any_cast<bool>(values[1]))
-            LOG_WARN("invalid ack from %d", v->voter);
-        else
-            on_receive_ack(*v);
-    });
-}
-
 void HotStuffBase::share_handler(MsgShare &&msg, const Net::conn_t &conn) {
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
@@ -411,7 +386,6 @@ void HotStuffBase::stop_commit_timer_all() {
 
 void HotStuffBase::set_propose_timer(double t_sec) {
     propose_timer = TimerEvent(ec, [this](TimerEvent &) {
-//        on_propose_timeout();
         do_propose();
         stop_propose_timer();
     });
@@ -432,6 +406,32 @@ void HotStuffBase::set_viewtrans_timer(double t_sec) {
 
 void HotStuffBase::stop_viewtrans_timer() {
     viewtrans_timer.clear();
+}
+
+void HotStuffBase::set_view_timer(double t_sec) {
+    view_timer = TimerEvent(ec, [this](TimerEvent &) {
+        view_timer.clear();
+        on_view_timeout();
+    });
+    view_timer.add(t_sec);
+}
+
+void HotStuffBase::set_vote_timer(const block_t &blk, ReplicaID dest, double t_sec) {
+    vote_timer = TimerEvent(ec, [this, blk=std::move(blk), dest](TimerEvent &) {
+        on_vote_timer_timeout(blk, dest);
+        vote_timer.clear();
+
+    });
+    vote_timer.add(t_sec);
+}
+
+void HotStuffBase::stop_vote_timer() {}
+
+void HotStuffBase::set_qc_receive_timer(uint32_t view, double t_sec) {
+    qc_receive_timer = TimerEvent(ec, [view, this](TimerEvent &) {
+        on_qc_receive_timeout(view);
+    });
+    qc_receive_timer.add(t_sec);
 }
 
 void HotStuffBase::req_blk_handler(MsgReqBlock &&msg, const Net::conn_t &conn) {
@@ -469,6 +469,7 @@ bool HotStuffBase::conn_handler(const salticidae::ConnPool::conn_t &conn, bool c
 }
 
 void HotStuffBase::print_stat() const {
+    return;
     LOG_INFO("===== begin stats =====");
     LOG_INFO("-------- queues -------");
     LOG_INFO("blk_fetch_waiting: %lu", blk_fetch_waiting.size());
@@ -581,7 +582,6 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::resp_blk_handler, this, _1, _2));
     pn.reg_conn_handler(salticidae::generic_bind(&HotStuffBase::conn_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::qc_handler, this, _1, _2));
-    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::ack_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::share_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo2_handler, this, _1, _2));
@@ -737,7 +737,8 @@ void HotStuffBase::process_status(Status &status){
     bool is_hqc = get_hqc_qc()->get_view() + 1 == _view;
 
     if (qsize + 1 >= nmajority && is_hqc) {
-        do_propose();
+        // Todo: update hqc to propose
+//        do_propose();
     }
 }
 
