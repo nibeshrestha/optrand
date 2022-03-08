@@ -32,22 +32,20 @@ if(${CURVE} STREQUAL "BN128")
   )
 endif()
 
-set(utt_packages
-    xassert
-    xutils
+set(pvss_packages
 )
 
 #
 # Dependencies
 #
 # TODO: Find ate-pairing, libff, libfqfft too or issue error with pointer to install script
-foreach(package ${utt_packages})
+foreach(package ${pvss_packages})
     find_package(${package} QUIET)
 
     if(${package}_FOUND)
         message("${package} library is installed!")
     else()
-        message("${package} library not installed locally, please download from https//github.com/alinush/lib${package}")
+        message("${package} library not installed locally!")
     endif()
 endforeach()
 
@@ -151,4 +149,7 @@ endif()
 #
 enable_testing()
 
-add_subdirectory(src)
+# add directories
+add_subdirectory(src) # Library sources
+add_subdirectory(test) # Testing sources
+add_subdirectory(bench) # Benchmark sources

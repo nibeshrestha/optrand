@@ -80,14 +80,14 @@ edit_cache/fast: edit_cache
 
 # The main all target
 all: cmake_check_build_system
-	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles /workspaces/optrand-cpp/crypto/src/CMakeFiles/progress.marks
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/all
+	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles /workspaces/optrand-cpp/crypto/bench/CMakeFiles/progress.marks
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/bench/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/clean
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/bench/clean
 .PHONY : clean
 
 # The main clean target
@@ -97,12 +97,12 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/preinstall
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/bench/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/preinstall
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/bench/preinstall
 .PHONY : preinstall/fast
 
 # clear depends

@@ -80,14 +80,14 @@ edit_cache/fast: edit_cache
 
 # The main all target
 all: cmake_check_build_system
-	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles /workspaces/optrand-cpp/crypto/src/CMakeFiles/progress.marks
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/all
+	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles /workspaces/optrand-cpp/crypto/src/pvss/CMakeFiles/progress.marks
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/pvss/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/clean
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/pvss/clean
 .PHONY : clean
 
 # The main clean target
@@ -97,18 +97,60 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/preinstall
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/pvss/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/preinstall
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/pvss/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
 	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
+
+# Convenience name for target.
+crypto/src/pvss/CMakeFiles/pvss.dir/rule:
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/pvss/CMakeFiles/pvss.dir/rule
+.PHONY : crypto/src/pvss/CMakeFiles/pvss.dir/rule
+
+# Convenience name for target.
+pvss: crypto/src/pvss/CMakeFiles/pvss.dir/rule
+
+.PHONY : pvss
+
+# fast build rule for target.
+pvss/fast:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/src/pvss/CMakeFiles/pvss.dir/build.make crypto/src/pvss/CMakeFiles/pvss.dir/build
+.PHONY : pvss/fast
+
+PVSS.o: PVSS.cpp.o
+
+.PHONY : PVSS.o
+
+# target to build an object file
+PVSS.cpp.o:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/src/pvss/CMakeFiles/pvss.dir/build.make crypto/src/pvss/CMakeFiles/pvss.dir/PVSS.cpp.o
+.PHONY : PVSS.cpp.o
+
+PVSS.i: PVSS.cpp.i
+
+.PHONY : PVSS.i
+
+# target to preprocess a source file
+PVSS.cpp.i:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/src/pvss/CMakeFiles/pvss.dir/build.make crypto/src/pvss/CMakeFiles/pvss.dir/PVSS.cpp.i
+.PHONY : PVSS.cpp.i
+
+PVSS.s: PVSS.cpp.s
+
+.PHONY : PVSS.s
+
+# target to generate assembly for a file
+PVSS.cpp.s:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/src/pvss/CMakeFiles/pvss.dir/build.make crypto/src/pvss/CMakeFiles/pvss.dir/PVSS.cpp.s
+.PHONY : PVSS.cpp.s
 
 # Help Target
 help:
@@ -118,6 +160,10 @@ help:
 	@echo "... depend"
 	@echo "... rebuild_cache"
 	@echo "... edit_cache"
+	@echo "... pvss"
+	@echo "... PVSS.o"
+	@echo "... PVSS.i"
+	@echo "... PVSS.s"
 .PHONY : help
 
 

@@ -80,14 +80,14 @@ edit_cache/fast: edit_cache
 
 # The main all target
 all: cmake_check_build_system
-	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles /workspaces/optrand-cpp/crypto/src/CMakeFiles/progress.marks
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/all
+	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles /workspaces/optrand-cpp/crypto/test/CMakeFiles/progress.marks
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/test/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/optrand-cpp/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/clean
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/test/clean
 .PHONY : clean
 
 # The main clean target
@@ -97,18 +97,60 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/preinstall
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/test/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/src/preinstall
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/test/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
 	cd /workspaces/optrand-cpp && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
+
+# Convenience name for target.
+crypto/test/CMakeFiles/TestPrint.dir/rule:
+	cd /workspaces/optrand-cpp && $(MAKE) -f CMakeFiles/Makefile2 crypto/test/CMakeFiles/TestPrint.dir/rule
+.PHONY : crypto/test/CMakeFiles/TestPrint.dir/rule
+
+# Convenience name for target.
+TestPrint: crypto/test/CMakeFiles/TestPrint.dir/rule
+
+.PHONY : TestPrint
+
+# fast build rule for target.
+TestPrint/fast:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/test/CMakeFiles/TestPrint.dir/build.make crypto/test/CMakeFiles/TestPrint.dir/build
+.PHONY : TestPrint/fast
+
+TestPrint.o: TestPrint.cpp.o
+
+.PHONY : TestPrint.o
+
+# target to build an object file
+TestPrint.cpp.o:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/test/CMakeFiles/TestPrint.dir/build.make crypto/test/CMakeFiles/TestPrint.dir/TestPrint.cpp.o
+.PHONY : TestPrint.cpp.o
+
+TestPrint.i: TestPrint.cpp.i
+
+.PHONY : TestPrint.i
+
+# target to preprocess a source file
+TestPrint.cpp.i:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/test/CMakeFiles/TestPrint.dir/build.make crypto/test/CMakeFiles/TestPrint.dir/TestPrint.cpp.i
+.PHONY : TestPrint.cpp.i
+
+TestPrint.s: TestPrint.cpp.s
+
+.PHONY : TestPrint.s
+
+# target to generate assembly for a file
+TestPrint.cpp.s:
+	cd /workspaces/optrand-cpp && $(MAKE) -f crypto/test/CMakeFiles/TestPrint.dir/build.make crypto/test/CMakeFiles/TestPrint.dir/TestPrint.cpp.s
+.PHONY : TestPrint.cpp.s
 
 # Help Target
 help:
@@ -118,6 +160,10 @@ help:
 	@echo "... depend"
 	@echo "... rebuild_cache"
 	@echo "... edit_cache"
+	@echo "... TestPrint"
+	@echo "... TestPrint.o"
+	@echo "... TestPrint.i"
+	@echo "... TestPrint.s"
 .PHONY : help
 
 
