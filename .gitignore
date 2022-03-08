@@ -27,3 +27,4 @@ core
 log*
 build/
 *CTestTestfile.cmake
+crypto/bin

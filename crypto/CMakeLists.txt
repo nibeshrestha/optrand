@@ -32,7 +32,11 @@ if(${CURVE} STREQUAL "BN128")
   )
 endif()
 
+include_directories(SYSTEM "/usr/local/include")
+link_directories("/usr/local/lib")
+
 set(pvss_packages
+    ff
 )
 
 #
