@@ -25,3 +25,5 @@ core
 .idea
 *.cbp
 log*
+build/
+*CTestTestfile.cmake
