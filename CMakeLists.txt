@@ -113,3 +113,6 @@ macro(remove_cxx_flag flag)
 endmacro()
 
 remove_cxx_flag("-DNDEBUG")
+
+# Cryptography config
+add_subdirectory(crypto)
