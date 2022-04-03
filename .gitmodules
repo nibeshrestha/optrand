@@ -1,0 +1,15 @@
+[submodule "secp256k1"]
+	path = secp256k1
+	url = https://github.com/bitcoin-core/secp256k1
+[submodule "salticidae"]
+	path = salticidae
+	url = https://github.com/Determinant/salticidae.git
+[submodule "depends/xbyak"]
+	path = depends/xbyak
+	url = ssh://github.com/herumi/xbyak.git
+[submodule "depends/libff"]
+	path = depends/libff
+	url = ssh://github.com/scipr-lab/libff.git
+[submodule "depends/ate-pairing"]
+	path = depends/ate-pairing
+	url = ssh://github.com/herumi/ate-pairing.git
