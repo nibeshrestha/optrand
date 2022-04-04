@@ -1,9 +1,6 @@
 CMakeFiles/
 .cache
 salticidae/
-depends
-depends/gf-complete
-depends/libff
 cmake_install.cmake
 CMakeDoxygenDefaults.cmake
 CMakeDoxyfile.in
