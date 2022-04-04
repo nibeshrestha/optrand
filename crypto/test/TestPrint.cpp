@@ -10,6 +10,8 @@
 #include "crypto/pvss/pvss.hpp"
 #include "crypto/pvss/Utils.hpp"
 
+#include "crypto/pvss/Serialization.hpp"
+
 // #define TEST_API
 
 // Some global helpers
