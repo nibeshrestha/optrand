@@ -73,21 +73,6 @@ public:
         return Context{pk_map, m_config_, g1, g2, h1, h2, secret_key, my_id};
     }
 
-    std::vector<pvss_aggregate_t> parse_dat_file(std::istream& in, size_t n){
-        std::vector<pvss_aggregate_t> agg_vec;
-
-        for (int i=0; i < n; i++){
-            pvss_aggregate_t agg;
-            std::cout << "here I am :)" << std::endl;
-            in >> agg;
-            std::cout << "Size of aggregator: " << agg.encryptions.size() << std::endl;
-            agg_vec.push_back(agg);
-            libff::consume_OUTPUT_NEWLINE(in);
-        }
-
-        return agg_vec;
-    }
-
 };
 
 }

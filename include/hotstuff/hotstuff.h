@@ -376,6 +376,7 @@ class HotStuffBase: public HotStuffCore {
             NetAddr listen_addr,
             pacemaker_bt pmaker,
             const optrand_crypto::Context &pvss_ctx,
+            std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
             EventContext ec,
             size_t nworker,
             const Net::Config &netconfig);
@@ -453,6 +454,7 @@ class HotStuff: public HotStuffBase {
             NetAddr listen_addr,
             pacemaker_bt pmaker,
             const optrand_crypto::Context &pvss_ctx,
+            std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
             EventContext ec = EventContext(),
             size_t nworker = 4,
             const Net::Config &netconfig = Net::Config()):
@@ -462,6 +464,7 @@ class HotStuff: public HotStuffBase {
                     listen_addr,
                     std::move(pmaker),
                     pvss_ctx,
+                    agg_vec,
                     ec,
                     nworker,
                     netconfig) {}

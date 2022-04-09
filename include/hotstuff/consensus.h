@@ -128,8 +128,8 @@ class HotStuffCore {
     std::unordered_map<uint32_t, std::vector<optrand_crypto::pvss_sharing_t>> view_transcripts;
     std::unordered_map<uint32_t, std::vector<size_t>> transcript_ids;
 
-
-    std::unordered_map<uint32_t, optrand_crypto::pvss_aggregate_t> agg_transcripts;
+    // A queue of aggregated transcripts
+    std::unordered_map<uint32_t, optrand_crypto::pvss_aggregate_t> agg_queue;
 
 
 
@@ -139,7 +139,7 @@ protected:
     public:
     BoxObj<EntityStorage> storage;
 
-    HotStuffCore(ReplicaID id, privkey_bt &&priv_key, const optrand_crypto::Context &pvss_ctx);
+    HotStuffCore(ReplicaID id, privkey_bt &&priv_key, const optrand_crypto::Context &pvss_ctx, std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec);
     virtual ~HotStuffCore() {
         b0->qc_ref = nullptr;
     }

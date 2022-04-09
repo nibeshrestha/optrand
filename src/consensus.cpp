@@ -35,7 +35,8 @@ namespace hotstuff {
 /*** begin HotStuff protocol logic ***/
 HotStuffCore::HotStuffCore(ReplicaID id,
                             privkey_bt &&priv_key,
-                            const optrand_crypto::Context &pvss_ctx):
+                            const optrand_crypto::Context &pvss_ctx,
+                            std::vector<optrand_crypto::pvss_aggregate_t> &setup_agg_vec):
         b0(new Block(true, 1)),
         b_exec(b0),
         vheight(0),
@@ -48,7 +49,12 @@ HotStuffCore::HotStuffCore(ReplicaID id,
         id(id),
         pvss_context(pvss_ctx),
         storage(new EntityStorage()) {
+
     storage->add_blk(b0);
+
+//    for(uint32_t i = 0; i < setup_agg_vec.size(); i++)
+//        agg_queue[i] = setup_agg_vec[i];
+
 }
 
 void HotStuffCore::sanity_check_delivered(const block_t &blk) {
@@ -116,9 +122,9 @@ void HotStuffCore::check_commit(const block_t &blk) {
         blk->decision = 1;
         do_consensus(blk);
         LOG_PROTO("commit %s", std::string(*blk).c_str());
-        for (size_t i = 0; i < blk->cmds.size(); i++)
-            do_decide(Finality(id, 1, i, blk->height,
-                                blk->cmds[i], blk->get_hash()));
+//        for (size_t i = 0; i < blk->cmds.size(); i++)
+//            do_decide(Finality(id, 1, i, blk->height,
+//                                blk->cmds[i], blk->get_hash()));
     }
     b_exec = blk;
 }
@@ -236,7 +242,7 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
         LOG_WARN("PVSS verification failed on receive proposal View: %d", view);
         return;
     }
-    agg_transcripts[view] = agg;
+    agg_queue[view] = agg;
 
     finished_propose[bnew] = true;
 

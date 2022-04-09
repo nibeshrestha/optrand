@@ -137,6 +137,7 @@ class HotStuffApp: public HotStuff {
                 NetAddr clisten_addr,
                 hotstuff::pacemaker_bt pmaker,
                 const optrand_crypto::Context &pvss_ctx,
+                std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
                 const EventContext &ec,
                 size_t nworker,
                 const Net::Config &repnet_config,
@@ -283,16 +284,17 @@ int main(int argc, char **argv) {
 
     std::ifstream ctx_stream;
     ctx_stream.open(opt_pvss_ctx->get());
+    if(ctx_stream.fail())
+        throw std::runtime_error("PVSS Context File Error!");
 
     auto pvss_ctx = factory.parseContext(ctx_stream);
     ctx_stream.close();
 
-
-    // Todo: for some reason following deserialization of aggregated PVSS transcripts fail. May be ask Adithya
-
     std::ifstream dat_stream;
     dat_stream.open(opt_pvss_dat->get());
-//
+    if(dat_stream.fail())
+        throw std::runtime_error("PVSS Setup File Error!");
+
     std::vector<optrand_crypto::pvss_aggregate_t> agg_vec;
     optrand_crypto::deserializeVector(dat_stream, agg_vec);
     dat_stream.close();
@@ -306,6 +308,7 @@ int main(int argc, char **argv) {
                         NetAddr("0.0.0.0", client_port),
                         std::move(pmaker),
                         pvss_ctx,
+                        agg_vec,
                         ec,
                         opt_nworker->get(),
                         repnet_config,
@@ -340,12 +343,13 @@ HotStuffApp::HotStuffApp(uint32_t blk_size,
                         NetAddr clisten_addr,
                         hotstuff::pacemaker_bt pmaker,
                         const optrand_crypto::Context &pvss_ctx,
+                        std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
                         const EventContext &ec,
                         size_t nworker,
                         const Net::Config &repnet_config,
                         const ClientNetwork<opcode_t>::Config &clinet_config):
     HotStuff(blk_size, idx, raw_privkey,
-            plisten_addr, std::move(pmaker), pvss_ctx, ec, nworker, repnet_config),
+            plisten_addr, std::move(pmaker), pvss_ctx, agg_vec, ec, nworker, repnet_config),
     stat_period(stat_period),
     impeach_timeout(impeach_timeout),
     ec(ec),

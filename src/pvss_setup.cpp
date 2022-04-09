@@ -66,6 +66,18 @@ int main(int argc, char **argv) {
     ofstream file;
     file.open("pvss-setup.dat");
 
-    serializeVector(file, agg_vec);
+    optrand_crypto::serializeVector(file, agg_vec);
     file.close();
+
+//    std::ifstream dat_stream;
+//    dat_stream.open("pvss-setup.dat");
+//    if(dat_stream.fail())
+//        throw std::runtime_error("PVSS Setup File Error!");
+//
+//    std::vector<optrand_crypto::pvss_aggregate_t> agg_vec2;
+//    optrand_crypto::deserializeVector(dat_stream, agg_vec2);
+//    dat_stream.close();
+//
+//    std::cout << "Size of output vector " << agg_vec2.size() << std::endl;
+
 }
