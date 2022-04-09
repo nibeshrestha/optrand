@@ -136,6 +136,7 @@ class HotStuffApp: public HotStuff {
                 NetAddr plisten_addr,
                 NetAddr clisten_addr,
                 hotstuff::pacemaker_bt pmaker,
+                const optrand_crypto::Context &pvss_ctx,
                 const EventContext &ec,
                 size_t nworker,
                 const Net::Config &repnet_config,
@@ -182,6 +183,8 @@ int main(int argc, char **argv) {
     auto opt_cliburst = Config::OptValInt::create(1000);
     auto opt_notls = Config::OptValFlag::create(false);
     auto opt_delta = Config::OptValDouble::create(1);
+    auto opt_pvss_ctx = Config::OptValStr::create();
+    auto opt_pvss_dat = Config::OptValStr::create();
 
     config.add_opt("block-size", opt_blk_size, Config::SET_VAL);
     config.add_opt("parent-limit", opt_parent_limit, Config::SET_VAL);
@@ -205,6 +208,8 @@ int main(int argc, char **argv) {
     config.add_opt("notls", opt_notls, Config::SWITCH_ON, 's', "disable TLS");
     config.add_opt("delta", opt_delta, Config::SET_VAL, 'd', "maximum network delay");
     config.add_opt("help", opt_help, Config::SWITCH_ON, 'h', "show this help info");
+    config.add_opt("pvss-ctx", opt_pvss_ctx, Config::SET_VAL, 'z', "PVSS ctx");
+    config.add_opt("pvss-dat", opt_pvss_dat, Config::SET_VAL, 'D', "PVSS dat");
 
     EventContext ec;
     config.parse(argc, argv);
@@ -268,6 +273,30 @@ int main(int argc, char **argv) {
     clinet_config
         .burst_size(opt_cliburst->get())
         .nworker(opt_clinworker->get());
+
+
+    optrand_crypto::initialize();
+
+    // Create a system config
+    auto conf = optrand_crypto::SyncSystemConfig::FromNumReplicas(replicas.size());
+    auto factory = optrand_crypto::Factory(std::move(conf));
+
+    std::ifstream ctx_stream;
+    ctx_stream.open(opt_pvss_ctx->get());
+
+    auto pvss_ctx = factory.parseContext(ctx_stream);
+    ctx_stream.close();
+
+
+    // Todo: for some reason following deserialization of aggregated PVSS transcripts fail. May be ask Adithya
+
+    std::ifstream dat_stream;
+    dat_stream.open(opt_pvss_dat->get());
+//
+    std::vector<optrand_crypto::pvss_aggregate_t> agg_vec;
+    optrand_crypto::deserializeVector(dat_stream, agg_vec);
+    dat_stream.close();
+
     papp = new HotStuffApp(opt_blk_size->get(),
                         opt_stat_period->get(),
                         opt_imp_timeout->get(),
@@ -276,6 +305,7 @@ int main(int argc, char **argv) {
                         plisten_addr,
                         NetAddr("0.0.0.0", client_port),
                         std::move(pmaker),
+                        pvss_ctx,
                         ec,
                         opt_nworker->get(),
                         repnet_config,
@@ -300,6 +330,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+
 HotStuffApp::HotStuffApp(uint32_t blk_size,
                         double stat_period,
                         double impeach_timeout,
@@ -308,12 +339,13 @@ HotStuffApp::HotStuffApp(uint32_t blk_size,
                         NetAddr plisten_addr,
                         NetAddr clisten_addr,
                         hotstuff::pacemaker_bt pmaker,
+                        const optrand_crypto::Context &pvss_ctx,
                         const EventContext &ec,
                         size_t nworker,
                         const Net::Config &repnet_config,
                         const ClientNetwork<opcode_t>::Config &clinet_config):
     HotStuff(blk_size, idx, raw_privkey,
-            plisten_addr, std::move(pmaker), ec, nworker, repnet_config),
+            plisten_addr, std::move(pmaker), pvss_ctx, ec, nworker, repnet_config),
     stat_period(stat_period),
     impeach_timeout(impeach_timeout),
     ec(ec),

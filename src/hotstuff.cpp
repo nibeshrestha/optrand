@@ -322,7 +322,7 @@ void HotStuffBase::status_handler(MsgStatus &&msg, const Net::conn_t &conn) {
         if (!promise::any_cast<bool>(values[0]))
             LOG_WARN("invalid status message from %s", std::string(peer).c_str());
         else
-            process_status(*n);
+            on_receive_status(*n);
     });
 }
 
@@ -411,8 +411,9 @@ void HotStuffBase::stop_commit_timer_all() {
 
 void HotStuffBase::set_propose_timer(double t_sec) {
     propose_timer = TimerEvent(ec, [this](TimerEvent &) {
-//        on_propose_timeout();
-        do_propose();
+        ReplicaID proposer = pmaker->get_proposer();
+        if(proposer != id || get_last_proposed_view() >= get_view()) return;
+        on_propose_timeout();
         stop_propose_timer();
     });
     propose_timer.add(t_sec);
@@ -545,10 +546,11 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
                     privkey_bt &&priv_key,
                     NetAddr listen_addr,
                     pacemaker_bt pmaker,
+                    const optrand_crypto::Context &pvss_ctx,
                     EventContext ec,
                     size_t nworker,
                     const Net::Config &netconfig):
-        HotStuffCore(rid, std::move(priv_key)),
+        HotStuffCore(rid, std::move(priv_key), pvss_ctx),
         listen_addr(listen_addr),
         blk_size(blk_size),
         ec(ec),
@@ -587,6 +589,7 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo2_handler, this, _1, _2));
     pn.start();
     pn.listen(listen_addr);
+
 }
 void HotStuffBase::do_consensus(const block_t &blk) {
     pmaker->on_consensus(blk);
@@ -638,11 +641,15 @@ void HotStuffBase::start(
 
     /* ((n - 1) + 1 - 1) / 2 */
     uint32_t nfaulty = peers.size() / 2;
-    last_proposed_view = 0;
     if (nfaulty == 0)
         LOG_WARN("too few replicas in the system to tolerate any failure");
+
     on_init(nfaulty, delta);
+
+
     pmaker->init(this);
+
+
     if (ec_loop)
         ec.dispatch();
 
@@ -665,7 +672,7 @@ void HotStuffBase::start(
             else
                 e.second(Finality(id, 0, 0, 0, cmd_hash, uint256_t()));
             if (proposer != get_id()) continue;
-            if (last_proposed_view >= get_view()) continue;
+            if (get_last_proposed_view() >= get_view()) continue;
             if(cmd_pending_buffer.size() >= blk_size){
 //                auto cmds = std::vector<uint256_t>{};
                 std::vector<uint256_t> cmds;
@@ -675,11 +682,12 @@ void HotStuffBase::start(
                     cmds.push_back(s.get_hash());
 
                 pmaker->beat().then([this, cmds=std::move(cmds)](ReplicaID proposer) {
-                    if (proposer == get_id()) {
-                        if (last_proposed_view >= get_view()) return;
-                        last_proposed_view = get_view();
-                        on_propose(cmds, pmaker->get_parents());
-                    }
+//                    if (proposer == get_id()) {
+                        if (get_last_proposed_view() >= get_view()) return;
+//                        on_propose(cmds, pmaker->get_parents());
+                        on_enter_view(1);
+
+//                    }
                 });
                 return true;
             }
@@ -708,37 +716,13 @@ void HotStuffBase::schedule_propose(double t_sec) {
 }
 
 
-void HotStuffBase::do_propose(){
+void HotStuffBase::do_propose(bytearray_t &&bt){
     ReplicaID proposer = pmaker->get_proposer();
-    if(proposer != id || last_proposed_view >= get_view()) return;
+    if(proposer != id || get_last_proposed_view() >= get_view()) return;
     stop_propose_timer();
-    last_proposed_view = get_view();
 
-    // Todo: add PVSS vector to proposal.
-    on_propose(std::vector<uint256_t >{}, pmaker->get_parents());
+    on_propose(std::vector<uint256_t >{}, pmaker->get_parents(), std::move(bt));
 }
 
-void HotStuffBase::process_status(Status &status){
-    //Todo: process PVSS part here.
-    uint32_t _view = get_view();
-    if(status.view < _view || last_proposed_view >= _view)
-        return;
-
-    size_t nmajority = get_config().nmajority;
-
-    size_t qsize = status_received[status.view].size();
-    if (!status_received[status.view].insert(status.replicaID).second)
-    {
-        LOG_WARN("duplicate status for view %d from %d", status.view, status.replicaID);
-        return;
-    }
-
-    on_receive_status(status);
-    bool is_hqc = get_hqc_qc()->get_view() + 1 == _view;
-
-    if (qsize + 1 >= nmajority && is_hqc) {
-        do_propose();
-    }
-}
 
 }

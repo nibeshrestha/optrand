@@ -34,7 +34,8 @@ namespace hotstuff {
 /* The core logic of HotStuff, is fairly simple :). */
 /*** begin HotStuff protocol logic ***/
 HotStuffCore::HotStuffCore(ReplicaID id,
-                            privkey_bt &&priv_key):
+                            privkey_bt &&priv_key,
+                            const optrand_crypto::Context &pvss_ctx):
         b0(new Block(true, 1)),
         b_exec(b0),
         vheight(0),
@@ -45,6 +46,7 @@ HotStuffCore::HotStuffCore(ReplicaID id,
         tails{b0},
         vote_disabled(false),
         id(id),
+        pvss_context(pvss_ctx),
         storage(new EntityStorage()) {
     storage->add_blk(b0);
 }
@@ -148,6 +150,7 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     if (parents.empty())
         throw std::runtime_error("empty parents");
     for (const auto &_: parents) tails.erase(_);
+
     /* create the new block */
     block_t bnew = storage->add_blk(
         new Block(parents, cmds,
@@ -168,7 +171,10 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     finished_propose[bnew] = true;
     _vote(bnew, id);
     on_propose_(prop);
-    /* boradcast to other replicas */
+
+    last_proposed_view = view;
+
+    /* broadcast to other replicas */
     do_broadcast_proposal(prop);
     on_receive_view_proposal_(view);
     return bnew;
@@ -179,7 +185,11 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     LOG_PROTO("got %s", std::string(prop).c_str());
 
     block_t bnew = prop.blk;
-    if (finished_propose[bnew]) return;
+    if (finished_propose[bnew]) {
+        LOG_PROTO("proposal finished %s", std::string(prop).c_str());
+        return;
+    }
+
     sanity_check_delivered(bnew);
     if (bnew->qc_ref)
         update_hqc(bnew->qc_ref, bnew->qc);
@@ -213,6 +223,21 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     LOG_PROTO("now state: %s", std::string(*this).c_str());
     if (bnew->qc_ref)
         on_qc_finish(bnew->qc_ref);
+
+    std::string str(bnew->extra.begin(), bnew->extra.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_aggregate_t agg;
+
+    ss >> agg;
+
+    if(!pvss_context.verify_aggregation(agg)) {
+        LOG_WARN("PVSS verification failed on receive proposal View: %d", view);
+        return;
+    }
+    agg_transcripts[view] = agg;
+
     finished_propose[bnew] = true;
 
     on_receive_proposal_(prop);
@@ -262,13 +287,61 @@ void HotStuffCore::on_receive_vote(const Vote &vote) {
 
 void HotStuffCore::on_receive_status(const Status &status) {
     LOG_PROTO("got %s", std::string(status).c_str());
-    if(status.view < view) return;
+    if(status.view < view || last_proposed_view >= view)
+        return;
 
     block_t blk = get_delivered_blk(status.qc->get_obj_hash());
 
     auto &blk_qc = blk->self_qc;
     blk_qc = status.qc->clone();
     update_hqc(blk, blk_qc);
+
+    if (!status_received[status.view].insert(status.replicaID).second)
+    {
+        LOG_WARN("duplicate status for view %d from %d", status.view, status.replicaID);
+        return;
+    }
+
+    std::string str(status.pvss_transcript.begin(), status.pvss_transcript.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_sharing_t pvss_recv;
+
+    ss >> pvss_recv;
+
+    if(!pvss_context.verify_sharing(pvss_recv)){
+        LOG_WARN("PVSS Verification failed in status View :%d", view);
+        return;
+    }
+
+    view_transcripts[status.view].push_back(pvss_recv);
+    transcript_ids[status.view].push_back((size_t) status.replicaID);
+
+    size_t nmajority = config.nmajority;
+    size_t qsize = status_received[status.view].size();
+
+    bool is_hqc = get_hqc_qc()->get_view() + 1 == view;
+
+    if (qsize + 1 >= nmajority && is_hqc) {
+        auto agg = pvss_context.aggregate(view_transcripts[status.view], transcript_ids[status.view]);
+
+        if(!pvss_context.verify_aggregation(agg)){
+            LOG_WARN("Aggregation Verification failed in status View :%d", view);
+            return;
+        }
+
+        // PVSS sharing
+        std::stringstream ss;
+        ss.str(std::string{});
+        ss << agg;
+
+        auto str = ss.str();
+        bytearray_t agg_bytes(str.begin(), str.end());
+
+        do_propose(std::move(agg_bytes));
+    }
+
 }
 
 
@@ -386,7 +459,6 @@ void HotStuffCore::_deliver_proposal(const Proposal &prop) {
         bytearray_t patharr;
         path->serialise(patharr);
         if (i != id) {
-            ;
             Echo echo(id, (uint32_t)i, prop.view, (uint32_t)MessageType::PROPOSAL, hash, patharr, chunk_array[i],
                     create_part_cert(*priv_key, hash, view), this);
             do_echo(echo, (ReplicaID)i);
@@ -480,6 +552,7 @@ void HotStuffCore::on_receive_proposal_echo(const Echo &echo){
         d >> prop;
         if(!prop.blk->delivered)
             on_deliver_blk(prop.blk);
+
         on_receive_proposal(prop);
     }
 }
@@ -535,7 +608,29 @@ void HotStuffCore::on_commit_timeout(const block_t &blk) { check_commit(blk); }
 
 void HotStuffCore::on_propose_timeout() {
     //Todo: Add logic to propose.
-//    do_propose();
+    size_t nmajority = config.nmajority;
+    size_t qsize = status_received[view].size();
+
+    if (qsize < config.nmajority){
+        LOG_WARN("Insufficient status messages; Timing error");
+    }
+
+    auto agg = pvss_context.aggregate(view_transcripts[view], transcript_ids[view]);
+
+    if(!pvss_context.verify_aggregation(agg)){
+        LOG_WARN("Aggregation Verification failed in status Idx: %d View :%d", view);
+        return;
+    }
+
+    // PVSS sharing
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << agg;
+
+    auto str = ss.str();
+    bytearray_t agg_bytes(str.begin(), str.end());
+
+    do_propose(std::move(agg_bytes));
 }
 
 void HotStuffCore::on_viewtrans_timeout() {
@@ -573,6 +668,9 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     last_view_cert_received = 0;
     last_view_shares_received = 0;
     last_cert_delivered_view = 0;
+    last_proposed_view = 0;
+
+
 }
 
 void HotStuffCore::prune(uint32_t staleness) {
@@ -715,10 +813,17 @@ void HotStuffCore::on_view_change() {
 void HotStuffCore::on_enter_view(const uint32_t _view) {
     view_waiting[_view].resolve();
 
-
 //    check_commit();
 
-    Status status(id, hqc.second->clone(), view, this);
+    // PVSS sharing
+    auto sharing = pvss_context.create_sharing();
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << sharing;
+    auto str = ss.str();
+    bytearray_t transcript(str.begin(), str.end());
+
+    Status status(id, hqc.second->clone(), view, std::move(transcript), this);
     do_status(status);
     schedule_propose(2*config.delta);
 }

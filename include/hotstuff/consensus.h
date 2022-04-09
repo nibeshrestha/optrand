@@ -29,6 +29,15 @@
 #include "erasure.h"
 #include "merklecpp.h"
 
+#include "crypto2/pvss/Aggregation.hpp"
+#include "crypto2/pvss/Beacon.hpp"
+#include "crypto2/pvss/Decryption.hpp"
+#include "crypto2/pvss/Factory.hpp"
+#include "crypto2/pvss/pvss.hpp"
+#include "crypto2/pvss/Utils.hpp"
+
+#include "crypto2/pvss/Serialization.hpp"
+
 namespace hotstuff {
 
 struct Proposal;
@@ -88,9 +97,8 @@ class HotStuffCore {
     void on_propose_(const Proposal &prop);
     void on_receive_proposal_(const Proposal &prop);
     void on_view_change();
-    void on_enter_view(const uint32_t _view);
-    void on_receive_qc_(const uint32_t _view);
-    void on_receive_view_proposal_(const uint32_t _view);
+    void on_receive_qc_(uint32_t _view);
+    void on_receive_view_proposal_(uint32_t _view);
     void _vote(const block_t &blk, ReplicaID dest);
     void _ack(const block_t &blk);
     void _deliver_proposal(const Proposal &prop);
@@ -107,17 +115,31 @@ class HotStuffCore {
     uint32_t last_view_cert_received;
     uint32_t last_view_shares_received;
     uint32_t last_cert_delivered_view;
+    uint32_t last_proposed_view;
     /* Erasure Coded Proposal Chunks by view */
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> prop_chunks;
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> qc_chunks;
 
-    protected:
+    std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> status_received;
+
+    // PVSS transcripts
+    optrand_crypto::Context pvss_context;
+
+    std::unordered_map<uint32_t, std::vector<optrand_crypto::pvss_sharing_t>> view_transcripts;
+    std::unordered_map<uint32_t, std::vector<size_t>> transcript_ids;
+
+
+    std::unordered_map<uint32_t, optrand_crypto::pvss_aggregate_t> agg_transcripts;
+
+
+
+protected:
     ReplicaID id;                  /**< identity of the replica itself */
 
     public:
     BoxObj<EntityStorage> storage;
 
-    HotStuffCore(ReplicaID id, privkey_bt &&priv_key);
+    HotStuffCore(ReplicaID id, privkey_bt &&priv_key, const optrand_crypto::Context &pvss_ctx);
     virtual ~HotStuffCore() {
         b0->qc_ref = nullptr;
     }
@@ -149,6 +171,7 @@ class HotStuffCore {
     void on_commit_timeout(const block_t &blk);
     void on_propose_timeout();
     void on_viewtrans_timeout();
+    void on_enter_view(uint32_t view);
 
     void on_receive_qc(const quorum_cert_bt &qc);
     void on_receive_ack(const Ack &ack);
@@ -198,6 +221,7 @@ class HotStuffCore {
     virtual void do_echo(const Echo &echo, ReplicaID dest) = 0;
     virtual void do_broadcast_echo2(const Echo &echo) = 0;
     virtual void do_echo2(const Echo &echo, ReplicaID dest) = 0;
+    virtual void do_propose(bytearray_t &&bt) = 0;
 
     virtual void schedule_propose(double t_sec) = 0;
     virtual void block_fetched(const block_t &blk, ReplicaID replicaId) = 0;
@@ -252,6 +276,8 @@ class HotStuffCore {
     uint32_t get_view() const { return view; }
     operator std::string () const;
     void set_vote_disabled(bool f) { vote_disabled = f; }
+
+    uint32_t get_last_proposed_view() {return last_proposed_view;}
 };
 
 
@@ -378,6 +404,7 @@ struct Status: public Serializable {
     ReplicaID replicaID;
     uint32_t view;
     quorum_cert_bt qc;
+    bytearray_t pvss_transcript;
 
     // Todo: add PVSS vector
 
@@ -386,23 +413,32 @@ struct Status: public Serializable {
 
     Status(): qc(nullptr), hsc(nullptr) {}
     Status(ReplicaID replicaID, quorum_cert_bt &&qc,
-           uint32_t view, HotStuffCore *hsc):
-        replicaID(replicaID), qc(std::move(qc)), view(view), hsc(hsc) {}
+           uint32_t view, bytearray_t &&pvss_transcript, HotStuffCore *hsc):
+            replicaID(replicaID), qc(std::move(qc)), view(view), pvss_transcript(std::move(pvss_transcript)), hsc(hsc) {}
 
     Status(const Status &other):
-        replicaID(replicaID),
-        qc(other.qc ? other.qc->clone() : nullptr),
-        view(other.view), hsc(other.hsc) {}
+            replicaID(replicaID),
+            qc(other.qc ? other.qc->clone() : nullptr),
+            view(other.view), pvss_transcript(std::move(other.pvss_transcript)),hsc(other.hsc) {}
 
     Status(Status &&other) = default;
     
     void serialize(DataStream &s) const override {
-        s << view << replicaID << *qc;
+        s << view << replicaID;
+        s << htole((uint32_t)pvss_transcript.size()) << pvss_transcript;
+        s << *qc;
     }
 
     void unserialize(DataStream &s) override {
+        uint32_t n;
         s >> view;
         s >> replicaID;
+
+        s >> n;
+        n = letoh(n);
+        auto base = s.get_data_inplace(n);
+        pvss_transcript = bytearray_t(base, base + n);
+
         qc = hsc->parse_quorum_cert(s);
     }
 
