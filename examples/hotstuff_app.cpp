@@ -137,7 +137,7 @@ class HotStuffApp: public HotStuff {
                 NetAddr clisten_addr,
                 hotstuff::pacemaker_bt pmaker,
                 const optrand_crypto::Context &pvss_ctx,
-                std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
+                const std::string setup_dat_file,
                 const EventContext &ec,
                 size_t nworker,
                 const Net::Config &repnet_config,
@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
     auto opt_tls_cert = Config::OptValStr::create();
     auto opt_help = Config::OptValFlag::create(false);
     auto opt_pace_maker = Config::OptValStr::create("dummy");
-    auto opt_fixed_proposer = Config::OptValInt::create(1);
+    auto opt_fixed_proposer = Config::OptValInt::create(0);
     auto opt_base_timeout = Config::OptValDouble::create(1);
     auto opt_prop_delay = Config::OptValDouble::create(1);
     auto opt_imp_timeout = Config::OptValDouble::create(11);
@@ -290,14 +290,8 @@ int main(int argc, char **argv) {
     auto pvss_ctx = factory.parseContext(ctx_stream);
     ctx_stream.close();
 
-    std::ifstream dat_stream;
-    dat_stream.open(opt_pvss_dat->get());
-    if(dat_stream.fail())
-        throw std::runtime_error("PVSS Setup File Error!");
-
-    std::vector<optrand_crypto::pvss_aggregate_t> agg_vec;
-    optrand_crypto::deserializeVector(dat_stream, agg_vec);
-    dat_stream.close();
+    // Nibesh: note to myself. Somehow passing std::vector<optrand_crypto::pvss_aggregate_t> to a function causing
+    // Segmentation fault. Hence, passing filename for now.
 
     papp = new HotStuffApp(opt_blk_size->get(),
                         opt_stat_period->get(),
@@ -308,7 +302,7 @@ int main(int argc, char **argv) {
                         NetAddr("0.0.0.0", client_port),
                         std::move(pmaker),
                         pvss_ctx,
-                        agg_vec,
+                        opt_pvss_dat->get(),
                         ec,
                         opt_nworker->get(),
                         repnet_config,
@@ -343,13 +337,13 @@ HotStuffApp::HotStuffApp(uint32_t blk_size,
                         NetAddr clisten_addr,
                         hotstuff::pacemaker_bt pmaker,
                         const optrand_crypto::Context &pvss_ctx,
-                        std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
+                        std::string setup_dat_file,
                         const EventContext &ec,
                         size_t nworker,
                         const Net::Config &repnet_config,
                         const ClientNetwork<opcode_t>::Config &clinet_config):
     HotStuff(blk_size, idx, raw_privkey,
-            plisten_addr, std::move(pmaker), pvss_ctx, agg_vec, ec, nworker, repnet_config),
+            plisten_addr, std::move(pmaker), pvss_ctx, setup_dat_file, ec, nworker, repnet_config),
     stat_period(stat_period),
     impeach_timeout(impeach_timeout),
     ec(ec),
