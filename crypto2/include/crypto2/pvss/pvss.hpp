@@ -268,15 +268,15 @@ inline pvss_aggregate_t Context::aggregate(const std::vector<pvss_sharing_t>& pv
         // 3. Aggregate all the decomposition proofs
         decomp_proofs.push_back(pvss.decomp_pi);
     }
-    #ifdef NDEBUG
+//    #ifndef NDEBUG
     return pvss_aggregate_t{encs, comms, decomp_proofs, id_vec};
-    #else
-    Fr sum = Fr::zero();
-    for(const auto& pvss: pvec) {
-        sum = sum + pvss.secret;
-    }
-    return pvss_aggregate_t{encs, comms, decomp_proofs, id_vec, sum};
-    #endif
+//    #else
+//    Fr sum = Fr::zero();
+//    for(const auto& pvss: pvec) {
+//        sum = sum + pvss.secret;
+//    }
+//    return pvss_aggregate_t{encs, comms, decomp_proofs, id_vec, sum};
+//    #endif
 }
 
 } // namespace crypto

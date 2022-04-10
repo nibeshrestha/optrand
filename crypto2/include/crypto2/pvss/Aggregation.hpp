@@ -23,6 +23,20 @@ public:
     Fr secret;
     #endif
 
+    pvss_aggregate_t(){}
+
+    pvss_aggregate_t(const std::vector<PK_Group> &encryptions, const std::vector<Com_Group> &commitments,
+            const std::vector<DecompositionProof> &decomposition, const std::vector<size_t> &id_vec):
+            encryptions(encryptions), commitments(commitments), decomposition(decomposition), id_vec(id_vec) {}
+
+    pvss_aggregate_t(const pvss_aggregate_t &other):
+        encryptions(other.encryptions),
+        commitments(other.commitments),
+        decomposition(other.decomposition),
+        id_vec(other.id_vec) {}
+
+
+
     friend std::ostream& operator<<(std::ostream& os, const optrand_crypto::pvss_aggregate_t& dt);
     friend std::istream& operator>>(std::istream& in, optrand_crypto::pvss_aggregate_t& dt);
 

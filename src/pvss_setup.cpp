@@ -25,27 +25,27 @@ int main(int argc, char **argv) {
     if (n < 1)
         error(1, 0, "n must be >0");
 
-    initialize();
+    optrand_crypto::initialize();
 
     auto conf = SyncSystemConfig::FromNumReplicas(n);
     auto factory = Factory(std::move(conf));
     auto setup = factory.getContext();
 
-    for (int i = 0; i < n; i++) {
-        std::string filename = "pvss-sec" + std::to_string(i) + ".conf";
-        ofstream fp;
-        fp.open(filename);
-        fp << setup.at(i);
-        fp.close();
-    }
+//    for (int i = 0; i < n; i++) {
+//        std::string filename = "pvss-sec" + std::to_string(i) + ".conf";
+//        ofstream fp;
+//        fp.open(filename);
+//        fp << setup.at(i);
+//        fp.close();
+//    }
 
     std::vector<pvss_sharing_t> pvss_vec;
     std::vector<size_t> id_vec;
     std::vector<pvss_aggregate_t> agg_vec;
-    int k, f = (n-1)/2;
+    int k, f = (n - 1) / 2;
     for (int i = 0; i < n; i++) {
 
-        for(int j = i ; j< i+f+1 ; j++){
+        for (int j = i; j < i + f + 1; j++) {
             k = j % n;
             auto sharing = setup.at(k).create_sharing();
             pvss_vec.push_back(sharing);
@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
         }
 
         auto agg = setup.at(i).aggregate(pvss_vec, id_vec);
-        if(!setup.at(i).verify_aggregation(agg)){
+        if (!setup.at(i).verify_aggregation(agg)) {
             throw std::runtime_error("aggregation verification failed");
         }
 
@@ -63,15 +63,16 @@ int main(int argc, char **argv) {
         id_vec.clear();
     }
 
-    ofstream file;
+    std::ofstream file;
     file.open("pvss-setup.dat");
 
     optrand_crypto::serializeVector(file, agg_vec);
     file.close();
 
+
 //    std::ifstream dat_stream;
 //    dat_stream.open("pvss-setup.dat");
-//    if(dat_stream.fail())
+//    if (dat_stream.fail())
 //        throw std::runtime_error("PVSS Setup File Error!");
 //
 //    std::vector<optrand_crypto::pvss_aggregate_t> agg_vec2;
