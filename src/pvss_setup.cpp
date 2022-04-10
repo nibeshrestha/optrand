@@ -31,13 +31,13 @@ int main(int argc, char **argv) {
     auto factory = Factory(std::move(conf));
     auto setup = factory.getContext();
 
-//    for (int i = 0; i < n; i++) {
-//        std::string filename = "pvss-sec" + std::to_string(i) + ".conf";
-//        ofstream fp;
-//        fp.open(filename);
-//        fp << setup.at(i);
-//        fp.close();
-//    }
+    for (int i = 0; i < n; i++) {
+        std::string filename = "pvss-sec" + std::to_string(i) + ".conf";
+        ofstream fp;
+        fp.open(filename);
+        fp << setup.at(i);
+        fp.close();
+    }
 
     std::vector<pvss_sharing_t> pvss_vec;
     std::vector<size_t> id_vec;
