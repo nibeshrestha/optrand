@@ -102,7 +102,7 @@ add_library(hotstuff
 #endif()
 add_library(hotstuff_static STATIC $<TARGET_OBJECTS:hotstuff>)
 set_target_properties(hotstuff_static PROPERTIES OUTPUT_NAME "hotstuff")
-target_link_libraries(hotstuff_static salticidae_static secp256k1 crypto ff gmp gmpxx zm Jerasure ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(hotstuff_static salticidae_static secp256k1 crypto pvss Jerasure ${CMAKE_THREAD_LIBS_INIT})
 
 add_subdirectory(test)
 
