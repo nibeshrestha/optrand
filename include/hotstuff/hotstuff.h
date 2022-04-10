@@ -359,9 +359,10 @@ class HotStuffBase: public HotStuffCore {
         pn.send_msg(MsgEcho2(echo), get_config().get_addr(dest));
     }
 
-    void do_propose(bytearray_t &&bt) override;
+    void do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg) override;
 
     void schedule_propose(double t_sec) override;
+
 
     protected:
 
@@ -376,7 +377,7 @@ class HotStuffBase: public HotStuffCore {
             NetAddr listen_addr,
             pacemaker_bt pmaker,
             const optrand_crypto::Context &pvss_ctx,
-            std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
+            const string setup_dat_file,
             EventContext ec,
             size_t nworker,
             const Net::Config &netconfig);
@@ -454,7 +455,7 @@ class HotStuff: public HotStuffBase {
             NetAddr listen_addr,
             pacemaker_bt pmaker,
             const optrand_crypto::Context &pvss_ctx,
-            std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
+            const string setup_dat_file,
             EventContext ec = EventContext(),
             size_t nworker = 4,
             const Net::Config &netconfig = Net::Config()):
@@ -464,10 +465,12 @@ class HotStuff: public HotStuffBase {
                     listen_addr,
                     std::move(pmaker),
                     pvss_ctx,
-                    agg_vec,
+                    setup_dat_file,
                     ec,
                     nworker,
-                    netconfig) {}
+                    netconfig) {
+
+    }
 
     void start(const std::vector<std::tuple<NetAddr, bytearray_t, bytearray_t>> &replicas,
                 double delta, bool ec_loop = false) {

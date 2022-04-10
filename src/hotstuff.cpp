@@ -547,11 +547,11 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
                     NetAddr listen_addr,
                     pacemaker_bt pmaker,
                     const optrand_crypto::Context &pvss_ctx,
-                    std::vector<optrand_crypto::pvss_aggregate_t> &agg_vec,
+                    const string setup_dat_file,
                     EventContext ec,
                     size_t nworker,
                     const Net::Config &netconfig):
-        HotStuffCore(rid, std::move(priv_key), pvss_ctx, agg_vec),
+        HotStuffCore(rid, std::move(priv_key), pvss_ctx, setup_dat_file),
         listen_addr(listen_addr),
         blk_size(blk_size),
         ec(ec),
@@ -672,7 +672,7 @@ void HotStuffBase::start(
             }
             else
                 e.second(Finality(id, 0, 0, 0, cmd_hash, uint256_t()));
-            if (proposer != get_id()) continue;
+//            if (proposer != get_id()) continue;
             if (get_last_proposed_view() >= get_view()) continue;
             if(cmd_pending_buffer.size() >= blk_size){
 //                auto cmds = std::vector<uint256_t>{};
@@ -686,6 +686,7 @@ void HotStuffBase::start(
 //                    if (proposer == get_id()) {
                         if (get_last_proposed_view() >= get_view()) return;
 //                        on_propose(cmds, pmaker->get_parents());
+                        enter_view(1);
                         on_enter_view(1);
 
 //                    }
@@ -717,12 +718,20 @@ void HotStuffBase::schedule_propose(double t_sec) {
 }
 
 
-void HotStuffBase::do_propose(bytearray_t &&bt){
+//void HotStuffBase::do_propose(bytearray_t &&bt){
+//    ReplicaID proposer = pmaker->get_proposer();
+//    if(proposer != id || get_last_proposed_view() >= get_view()) return;
+//    stop_propose_timer();
+//
+//    on_propose(std::vector<uint256_t >{}, pmaker->get_parents(), std::move(bt));
+//}
+
+void HotStuffBase::do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg){
     ReplicaID proposer = pmaker->get_proposer();
     if(proposer != id || get_last_proposed_view() >= get_view()) return;
     stop_propose_timer();
 
-    on_propose(std::vector<uint256_t >{}, pmaker->get_parents(), std::move(bt));
+    on_propose(std::vector<uint256_t >{}, pmaker->get_parents(), pvss_agg);
 }
 
 

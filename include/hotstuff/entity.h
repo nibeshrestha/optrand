@@ -23,6 +23,7 @@
 #include <string>
 #include <cstddef>
 #include <ios>
+#include <crypto2/pvss/Aggregation.hpp>
 
 #include "salticidae/netaddr.h"
 #include "salticidae/ref.h"
@@ -144,6 +145,9 @@ class Block {
 
     std::unordered_set<ReplicaID> voted;
     std::unordered_set<ReplicaID> acked;
+
+    uint32_t view;
+    optrand_crypto::pvss_aggregate_t pvss_agg;
 
     public:
     Block():
