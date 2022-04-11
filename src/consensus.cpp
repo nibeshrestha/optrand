@@ -515,7 +515,8 @@ void HotStuffCore::on_receive_share(const Share &share){
 
         Beacon beacon1(id, view, std::move(beacon_bytes), this);
         do_broadcast_beacon(beacon1);
-
+        // Not a warning; just using LOG_WARN to print beacon output.
+        LOG_WARN("beacon output in view :%d", view);
         last_view_shares_received = view;
         last_view_beacon_received = view;
         _try_enter_view();
