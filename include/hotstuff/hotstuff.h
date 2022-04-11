@@ -114,6 +114,16 @@ struct MsgShare {
     void postponed_parse(HotStuffCore *hsc);
 };
 
+struct MsgBeacon {
+    static const opcode_t opcode = 0x10;
+    DataStream serialized;
+    Beacon beacon;
+    MsgBeacon(const Beacon &);
+    MsgBeacon(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+
 struct MsgEcho {
     static const opcode_t opcode = 0x5;
     DataStream serialized;
@@ -275,6 +285,7 @@ class HotStuffBase: public HotStuffCore {
     inline void qc_handler(MsgQC &&, const Net::conn_t &);
     inline void ack_handler(MsgAck &&, const Net::conn_t &);
     inline void share_handler(MsgShare &&, const Net::conn_t &);
+    inline void beacon_handler(MsgBeacon &&, const Net::conn_t &);
     inline void echo_handler(MsgEcho &&, const Net::conn_t &);
     inline void echo2_handler(MsgEcho2 &&, const Net::conn_t &);
 
@@ -345,6 +356,10 @@ class HotStuffBase: public HotStuffCore {
 
     void do_broadcast_echo(const Echo &echo) override {
         _do_broadcast<Echo, MsgEcho>(echo);
+    }
+
+    void do_broadcast_beacon(const Beacon &beacon) override {
+        _do_broadcast<Beacon, MsgBeacon>(beacon);
     }
 
     void do_echo(const Echo &echo, ReplicaID dest) override {

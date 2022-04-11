@@ -50,6 +50,7 @@ struct QC;
 struct Ack;
 struct Share;
 struct Echo;
+struct Beacon;
 
 /** Abstraction for HotStuff protocol state machine (without network implementation). */
 class HotStuffCore {
@@ -106,6 +107,8 @@ class HotStuffCore {
     void _broadcast_share(uint32_t view);
     void _try_enter_view();
 
+    void _update_agg_queue(uint32_t view);
+
     uint32_t last_propose_delivered_view;
     uint32_t last_propose_decoded_view;
     uint32_t last_cert_decoded_view;
@@ -114,6 +117,7 @@ class HotStuffCore {
     uint32_t last_view_shares_received;
     uint32_t last_cert_delivered_view;
     uint32_t last_proposed_view;
+    uint32_t last_view_beacon_received;
     /* Erasure Coded Proposal Chunks by view */
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> prop_chunks;
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> qc_chunks;
@@ -178,6 +182,8 @@ protected:
     void on_receive_share(const Share &share);
     void on_receive_proposal_echo(const Echo &echo);
     void on_receive_cert_echo(const Echo &echo);
+    void on_receive_beacon(const Beacon &beacon);
+
 
     /** Call to submit new commands to be decided (executed). "Parents" must
      * contain at least one block, and the first block is the actual parent,
@@ -217,12 +223,14 @@ protected:
     virtual void do_vote(const Vote &vote, ReplicaID dest) = 0;
     virtual void do_broadcast_ack(const Ack &ack) = 0;
     virtual void do_broadcast_share(const Share &share) = 0;
+    virtual void do_broadcast_beacon(const Beacon &beacon) = 0;
     virtual void do_status(const Status &status) = 0;
     virtual void do_broadcast_echo(const Echo &echo) = 0;
     virtual void do_echo(const Echo &echo, ReplicaID dest) = 0;
     virtual void do_broadcast_echo2(const Echo &echo) = 0;
     virtual void do_echo2(const Echo &echo, ReplicaID dest) = 0;
     virtual void do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg) = 0;
+
 
     virtual void schedule_propose(double t_sec) = 0;
     virtual void block_fetched(const block_t &blk, ReplicaID replicaId) = 0;
@@ -948,6 +956,78 @@ struct Echo: public Serializable {
           << "view=" << std::to_string(view) << " "
           << "mtype=" << std::to_string(mtype) << " "
           << "hash=" << get_hex10(merkle_root) << ">";
+        return std::move(s);
+    }
+};
+
+
+/** Abstraction for Beacon messages to send beacon */
+struct Beacon: public Serializable {
+    ReplicaID replicaId;
+    uint32_t view;
+    // beacon;
+    bytearray_t bt;
+
+    HotStuffCore *hsc;
+
+    Beacon()  {}
+    Beacon(ReplicaID replicaId,
+          const uint32_t &view,
+          bytearray_t &&bt,
+          HotStuffCore *hsc):
+            replicaId(replicaId),
+            view(view),
+            bt(std::move(bt)),
+            hsc(hsc){}
+
+    Beacon(const Beacon &other,
+            HotStuffCore *hsc):
+            replicaId(other.replicaId),
+            view(other.view), bt(std::move(other.bt)),
+            hsc(other.hsc){}
+
+    Beacon(Beacon &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << replicaId << view;
+        s << htole((uint32_t)bt.size()) << bt;
+    }
+
+    void unserialize(DataStream &s) override {
+        uint32_t n;
+        s >> replicaId >> view;
+
+        s >> n;
+        n = letoh(n);
+        auto base = s.get_data_inplace(n);
+        bt = bytearray_t(base, base + n);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &blk_hash) {
+//        DataStream p;
+//        p << blk_hash;
+        return blk_hash;
+    }
+
+    bool verify() const {
+//        assert(hsc != nullptr);
+//        return cert->verify(hsc->get_config().get_pubkey(replicaId));
+        return true;
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+//        assert(hsc != nullptr);
+        return promise_t([](promise_t &pm) { pm.resolve(true); });
+//        return cert->verify(hsc->get_config().get_pubkey(replicaId), vpool).then([this](bool result) {
+//            return result;
+//        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<beacon "
+          << "rid=" << std::to_string(replicaId) << " "
+          << "view=" << std::to_string(view) << ">";
         return std::move(s);
     }
 };

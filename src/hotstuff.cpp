@@ -104,6 +104,13 @@ void MsgShare::postponed_parse(HotStuffCore *hsc) {
     serialized >> share;
 }
 
+const opcode_t MsgBeacon::opcode;
+MsgBeacon::MsgBeacon(const Beacon & beacon) { serialized << beacon; }
+void MsgBeacon::postponed_parse(HotStuffCore *hsc) {
+//    share.hsc = hsc;
+    serialized >> beacon;
+}
+
 const opcode_t MsgEcho::opcode;
 MsgEcho::MsgEcho(const Echo &echo) { serialized << echo; }
 void MsgEcho::postponed_parse(HotStuffCore *hsc) {
@@ -309,6 +316,25 @@ void HotStuffBase::share_handler(MsgShare &&msg, const Net::conn_t &conn) {
             on_receive_share(*v);
     });
 }
+
+void HotStuffBase::beacon_handler(MsgBeacon &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<Beacon> v(new Beacon(std::move(msg.beacon)));
+
+    promise::all(std::vector<promise_t>{
+            async_wait_enter_view(v->view),
+            async_wait_deliver_proposal(v->view),
+            async_wait_view_qc(v->view),
+    }).then([this, v=std::move(v)](const promise::values_t values) {
+//        if (!promise::any_cast<bool>(values[0]))
+//                    LOG_WARN("invalid share from %d", v->replicaId);
+//        else
+        on_receive_beacon(*v);
+    });
+}
+
 
 void HotStuffBase::status_handler(MsgStatus &&msg, const Net::conn_t &conn) {
     const NetAddr &peer = conn->get_peer_addr();
@@ -586,6 +612,7 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::qc_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::ack_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::share_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::beacon_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo2_handler, this, _1, _2));
     pn.start();

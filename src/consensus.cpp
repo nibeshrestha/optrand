@@ -345,8 +345,7 @@ void HotStuffCore::on_receive_status(const Status &status) {
     ss >> pvss_recv;
 
     if(!pvss_context.verify_sharing(pvss_recv)){
-        LOG_WARN("PVSS Verification failed in status View :%d", view);
-        return;
+        throw std::runtime_error("PVSS Verification failed in status");
     }
 
     view_transcripts[status.view].push_back(pvss_recv);
@@ -364,10 +363,8 @@ void HotStuffCore::on_receive_status(const Status &status) {
             LOG_WARN("Aggregation Verification failed in status View :%d", view);
             return;
         }
-
         do_propose(agg);
     }
-
 }
 
 
@@ -414,6 +411,34 @@ void HotStuffCore::on_receive_ack(const Ack &ack) {
         check_commit(blk);
         _broadcast_share(view);
     }
+}
+
+void HotStuffCore::_update_agg_queue(const uint32_t _view){
+    if(_view < config.nmajority) return;
+    auto to_update_view = _view - config.nmajority + 1;
+    auto to_update_proposer = get_proposer(to_update_view);
+    agg_queue[to_update_proposer] = view_agg_transcripts[to_update_view];
+
+}
+
+void HotStuffCore::on_receive_beacon(const Beacon &beacon){
+    LOG_PROTO("got %s", std::string(beacon).c_str());
+    if (beacon.view < view || last_view_beacon_received <= beacon.view) return;
+
+    std::string str(beacon.bt.begin(), beacon.bt.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::beacon_t beacon1;
+    ss >> beacon1;
+
+    auto proposer = get_proposer(beacon.view);
+    if(!pvss_context.verify_beacon(agg_queue[proposer], beacon1)){
+        throw std::runtime_error("Beacon Verification failed.");
+        return;
+    }
+    last_view_beacon_received = view;
+    _try_enter_view();
 }
 
 void HotStuffCore::_ack(const block_t &blk){
@@ -468,32 +493,38 @@ void HotStuffCore::on_receive_share(const Share &share){
     ReplicaID proposer = get_proposer(share.view);
 
     if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
-        LOG_WARN("Decryption Verification failed in View :%d", view);
-        return;
-    }else{
-        LOG_INFO("Decryption verification successful for sender %d view %d", share.replicaId, share.view);
-
-    };
-
+        throw std::runtime_error("Decryption Verification failed in View");
+    }
     view_shares[share.view].push_back(dec_share);
 
     if (qsize + 1 == config.nmajority){
         //Todo: reconstruct the secret and broadcast it.
-        LOG_INFO("Size of shares %d", view_shares[share.view].size());
         auto beacon = pvss_context.reconstruct(view_shares[share.view]);
 
         if(!pvss_context.verify_beacon(agg_queue[proposer], beacon)){
-            LOG_WARN("Beacon Verification failed in View :%d", view);
+            throw std::runtime_error("Beacon Verification failed.");
             return;
         }
 
+        std::stringstream ss2;
+        ss2.str(std::string{});
+        ss2 << beacon;
+
+        auto str = ss2.str();
+        bytearray_t beacon_bytes(str.begin(), str.end());
+
+        Beacon beacon1(id, view, std::move(beacon_bytes), this);
+        do_broadcast_beacon(beacon1);
+
         last_view_shares_received = view;
+        last_view_beacon_received = view;
         _try_enter_view();
     }
 }
 
 void HotStuffCore::_try_enter_view() {
-    if(last_view_shares_received == view && last_view_cert_received == view) {
+    if(last_view_cert_received == view && (last_view_shares_received == view || last_view_beacon_received == view)) {
+        _update_agg_queue(view);
         view += 1;
         enter_view(view);
         on_enter_view(view);
@@ -724,6 +755,7 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     last_view_shares_received = 0;
     last_cert_delivered_view = 0;
     last_proposed_view = 0;
+    last_view_beacon_received = 0;
 
 }
 
@@ -866,8 +898,6 @@ void HotStuffCore::on_view_change() {
 
 void HotStuffCore::on_enter_view(const uint32_t _view) {
     view_waiting[_view].resolve();
-
-//    check_commit();
 
     // PVSS sharing
     auto sharing = pvss_context.create_sharing();
