@@ -401,7 +401,7 @@ void HotStuffCore::on_receive_ack(const Ack &ack) {
     if (qsize >= config.nresponsive) return;
     if (!blk->acked.insert(ack.voter).second)
     {
-        LOG_WARN("duplicate ack for %s from %d", get_hex10(ack.blk_hash).c_str(), ack.voter);
+//        LOG_WARN("duplicate ack for %s from %d", get_hex10(ack.blk_hash).c_str(), ack.voter);
         return;
     }
     auto &qc = blk->self_qc;
