@@ -29,6 +29,15 @@
 #include "erasure.h"
 #include "merklecpp.h"
 
+#include "crypto2/pvss/Aggregation.hpp"
+#include "crypto2/pvss/Beacon.hpp"
+#include "crypto2/pvss/Decryption.hpp"
+#include "crypto2/pvss/Factory.hpp"
+#include "crypto2/pvss/pvss.hpp"
+#include "crypto2/pvss/Utils.hpp"
+
+#include "crypto2/pvss/Serialization.hpp"
+
 namespace hotstuff {
 
 struct Proposal;
@@ -40,6 +49,7 @@ struct Finality;
 struct QC;
 struct Share;
 struct Echo;
+struct Beacon;
 
 /** Abstraction for HotStuff protocol state machine (without network implementation). */
 class HotStuffCore {
@@ -73,7 +83,6 @@ class HotStuffCore {
     std::unordered_map<uint32_t, promise_t> view_waiting;
     std::unordered_map<uint32_t, promise_t> view_qc_waiting;
     std::unordered_map<uint32_t, promise_t> view_proposal_waiting;
-    std::unordered_map<uint32_t, block_t> view_proposals;
 
     /* == feature switches == */
     /** always vote negatively, useful for some PaceMakers */
@@ -88,16 +97,15 @@ class HotStuffCore {
     void on_propose_(const Proposal &prop);
     void on_receive_proposal_(const Proposal &prop);
     void on_view_change();
-    void on_enter_view(const uint32_t _view);
-    void on_receive_qc_(const uint32_t _view);
-    void on_receive_view_proposal_(const uint32_t _view);
+    void on_receive_qc_(uint32_t _view);
+    void on_receive_view_proposal_(uint32_t _view);
     void _vote(const block_t &blk, ReplicaID dest);
     void _deliver_proposal(const Proposal &prop);
     void _deliver_cert(const quorum_cert_bt &qc);
     void _broadcast_share(uint32_t view);
     void _enter_view();
 
-    std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> view_shares;
+    void _update_agg_queue(uint32_t view);
 
     uint32_t last_propose_delivered_view;
     uint32_t last_propose_decoded_view;
@@ -107,17 +115,34 @@ class HotStuffCore {
     uint32_t last_view_shares_received;
     uint32_t last_cert_delivered_view;
     uint32_t qc_received_timeout_view;
+    uint32_t last_proposed_view;
+    uint32_t last_view_beacon_received;
     /* Erasure Coded Proposal Chunks by view */
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> prop_chunks;
     std::unordered_map<uint32_t, std::unordered_map<ReplicaID, chunk_t>> qc_chunks;
 
-    protected:
+    std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> status_received;
+
+    // PVSS transcripts
+    optrand_crypto::Context pvss_context;
+
+    std::unordered_map<uint32_t, std::vector<optrand_crypto::pvss_sharing_t>> view_transcripts;
+    std::unordered_map<uint32_t, std::vector<size_t>> transcript_ids;
+
+    std::unordered_map<uint32_t, std::vector<optrand_crypto::decryption_t>> view_shares;
+
+    // A queue of aggregated transcripts per party
+    std::unordered_map<ReplicaID, optrand_crypto::pvss_aggregate_t> agg_queue;
+    std::unordered_map<uint32_t, optrand_crypto::pvss_aggregate_t> view_agg_transcripts;
+
+
+protected:
     ReplicaID id;                  /**< identity of the replica itself */
 
     public:
     BoxObj<EntityStorage> storage;
 
-    HotStuffCore(ReplicaID id, privkey_bt &&priv_key);
+    HotStuffCore(ReplicaID id, privkey_bt &&priv_key, const optrand_crypto::Context &pvss_ctx, const std::string setup_dat_file);
     virtual ~HotStuffCore() {
         b0->qc_ref = nullptr;
     }
@@ -149,6 +174,8 @@ class HotStuffCore {
     void on_commit_timeout(const block_t &blk);
     void on_propose_timeout();
     void on_viewtrans_timeout();
+    void on_enter_view(uint32_t view);
+
     void on_view_timeout();
     void on_vote_timer_timeout(const block_t &blk, ReplicaID dest);
     void on_qc_receive_timeout(uint32_t view);
@@ -157,12 +184,15 @@ class HotStuffCore {
     void on_receive_share(const Share &share);
     void on_receive_proposal_echo(const Echo &echo);
     void on_receive_cert_echo(const Echo &echo);
+    void on_receive_beacon(const Beacon &beacon);
+
 
     /** Call to submit new commands to be decided (executed). "Parents" must
      * contain at least one block, and the first block is the actual parent,
      * while the others are uncles/aunts */
     block_t on_propose(const std::vector<uint256_t> &cmds,
                     const std::vector<block_t> &parents,
+                    const optrand_crypto::pvss_aggregate_t &pvss_agg,
                     bytearray_t &&extra = bytearray_t());
 
 
@@ -199,11 +229,14 @@ class HotStuffCore {
     virtual void enter_view(uint32_t _view) = 0;
     virtual void do_vote(const Vote &vote, ReplicaID dest) = 0;
     virtual void do_broadcast_share(const Share &share) = 0;
+    virtual void do_broadcast_beacon(const Beacon &beacon) = 0;
     virtual void do_status(const Status &status) = 0;
     virtual void do_broadcast_echo(const Echo &echo) = 0;
     virtual void do_echo(const Echo &echo, ReplicaID dest) = 0;
     virtual void do_broadcast_echo2(const Echo &echo) = 0;
     virtual void do_echo2(const Echo &echo, ReplicaID dest) = 0;
+    virtual void do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg) = 0;
+
 
     virtual void schedule_propose(double t_sec) = 0;
     virtual void block_fetched(const block_t &blk, ReplicaID replicaId) = 0;
@@ -258,6 +291,15 @@ class HotStuffCore {
     uint32_t get_view() const { return view; }
     operator std::string () const;
     void set_vote_disabled(bool f) { vote_disabled = f; }
+
+    uint32_t get_last_proposed_view() {return last_proposed_view;}
+
+private:
+
+    ReplicaID get_proposer(uint32_t _view){
+        // Nibesh: Duplicate of get_proposer function in pacemaker.
+        return (_view -1) % config.nreplicas;
+    }
 };
 
 
@@ -384,6 +426,7 @@ struct Status: public Serializable {
     ReplicaID replicaID;
     uint32_t view;
     quorum_cert_bt qc;
+    bytearray_t pvss_transcript;
 
     // Todo: add PVSS vector
 
@@ -392,23 +435,32 @@ struct Status: public Serializable {
 
     Status(): qc(nullptr), hsc(nullptr) {}
     Status(ReplicaID replicaID, quorum_cert_bt &&qc,
-           uint32_t view, HotStuffCore *hsc):
-        replicaID(replicaID), qc(std::move(qc)), view(view), hsc(hsc) {}
+           uint32_t view, bytearray_t &&pvss_transcript, HotStuffCore *hsc):
+            replicaID(replicaID), qc(std::move(qc)), view(view), pvss_transcript(std::move(pvss_transcript)), hsc(hsc) {}
 
     Status(const Status &other):
-        replicaID(replicaID),
-        qc(other.qc ? other.qc->clone() : nullptr),
-        view(other.view), hsc(other.hsc) {}
+            replicaID(replicaID),
+            qc(other.qc ? other.qc->clone() : nullptr),
+            view(other.view), pvss_transcript(std::move(other.pvss_transcript)),hsc(other.hsc) {}
 
     Status(Status &&other) = default;
     
     void serialize(DataStream &s) const override {
-        s << view << replicaID << *qc;
+        s << view << replicaID;
+        s << htole((uint32_t)pvss_transcript.size()) << pvss_transcript;
+        s << *qc;
     }
 
     void unserialize(DataStream &s) override {
+        uint32_t n;
         s >> view;
         s >> replicaID;
+
+        s >> n;
+        n = letoh(n);
+        auto base = s.get_data_inplace(n);
+        pvss_transcript = bytearray_t(base, base + n);
+
         qc = hsc->parse_quorum_cert(s);
     }
 
@@ -419,6 +471,11 @@ struct Status: public Serializable {
 
     promise_t verify(VeriPool &vpool) const {
         assert(hsc != nullptr);
+
+        // Nibesh: quick hack to not check qc in view 1 as there is no qc in the first status message
+        if(view == 1)
+            return promise_t([](promise_t &pm){ pm.resolve(true); });
+
         return qc->verify(hsc->get_config(), vpool).then([this](bool result) {
             return result;
         });
@@ -667,6 +724,9 @@ struct Share: public Serializable {
 
     uint32_t view;
 
+    // Decryption;
+    bytearray_t bt;
+
     /** handle of the core object to allow polymorphism */
     HotStuffCore *hsc;
 
@@ -674,26 +734,36 @@ struct Share: public Serializable {
     Share(ReplicaID replicaId,
         part_cert_bt &&cert,
         const uint32_t &view,
+        bytearray_t &&bt,
         HotStuffCore *hsc):
             replicaId(replicaId),
             cert(std::move(cert)),
-            view(view), hsc(hsc) {}
+            view(view), bt(std::move(bt)), hsc(hsc) {}
 
     Share(const Share &other):
             replicaId(other.replicaId),
             cert(other.cert ? other.cert->clone() : nullptr),
-            view(other.view),
+            view(other.view), bt(std::move(other.bt)),
             hsc(other.hsc) {}
 
     Share(Share &&other) = default;
 
     void serialize(DataStream &s) const override {
-        s << replicaId << view << *cert;
+        s << replicaId << view;
+        s << htole((uint32_t)bt.size()) << bt;
+        s << *cert;
     }
 
     void unserialize(DataStream &s) override {
         assert(hsc != nullptr);
+        uint32_t n;
         s >> replicaId >> view;
+
+        s >> n;
+        n = letoh(n);
+        auto base = s.get_data_inplace(n);
+        bt = bytearray_t(base, base + n);
+
         cert = hsc->parse_part_cert(s);
     }
 
@@ -820,6 +890,78 @@ struct Echo: public Serializable {
           << "view=" << std::to_string(view) << " "
           << "mtype=" << std::to_string(mtype) << " "
           << "hash=" << get_hex10(merkle_root) << ">";
+        return std::move(s);
+    }
+};
+
+
+/** Abstraction for Beacon messages to send beacon */
+struct Beacon: public Serializable {
+    ReplicaID replicaId;
+    uint32_t view;
+    // beacon;
+    bytearray_t bt;
+
+    HotStuffCore *hsc;
+
+    Beacon()  {}
+    Beacon(ReplicaID replicaId,
+          const uint32_t &view,
+          bytearray_t &&bt,
+          HotStuffCore *hsc):
+            replicaId(replicaId),
+            view(view),
+            bt(std::move(bt)),
+            hsc(hsc){}
+
+    Beacon(const Beacon &other,
+            HotStuffCore *hsc):
+            replicaId(other.replicaId),
+            view(other.view), bt(std::move(other.bt)),
+            hsc(other.hsc){}
+
+    Beacon(Beacon &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << replicaId << view;
+        s << htole((uint32_t)bt.size()) << bt;
+    }
+
+    void unserialize(DataStream &s) override {
+        uint32_t n;
+        s >> replicaId >> view;
+
+        s >> n;
+        n = letoh(n);
+        auto base = s.get_data_inplace(n);
+        bt = bytearray_t(base, base + n);
+    }
+
+    static uint256_t proof_obj_hash(const uint256_t &blk_hash) {
+//        DataStream p;
+//        p << blk_hash;
+        return blk_hash;
+    }
+
+    bool verify() const {
+//        assert(hsc != nullptr);
+//        return cert->verify(hsc->get_config().get_pubkey(replicaId));
+        return true;
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+//        assert(hsc != nullptr);
+        return promise_t([](promise_t &pm) { pm.resolve(true); });
+//        return cert->verify(hsc->get_config().get_pubkey(replicaId), vpool).then([this](bool result) {
+//            return result;
+//        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<beacon "
+          << "rid=" << std::to_string(replicaId) << " "
+          << "view=" << std::to_string(view) << ">";
         return std::move(s);
     }
 };

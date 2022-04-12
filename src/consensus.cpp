@@ -34,7 +34,9 @@ namespace hotstuff {
 /* The core logic of HotStuff, is fairly simple :). */
 /*** begin HotStuff protocol logic ***/
 HotStuffCore::HotStuffCore(ReplicaID id,
-                            privkey_bt &&priv_key):
+                            privkey_bt &&priv_key,
+                            const optrand_crypto::Context &pvss_ctx,
+                            const std::string setup_dat_file):
         b0(new Block(true, 1)),
         b_exec(b0),
         vheight(0),
@@ -45,9 +47,28 @@ HotStuffCore::HotStuffCore(ReplicaID id,
         tails{b0},
         vote_disabled(false),
         id(id),
+        pvss_context(pvss_ctx),
         storage(new EntityStorage()) {
-    storage->add_blk(b0);
-}
+
+        storage->add_blk(b0);
+        std::ifstream dat_stream;
+        dat_stream.open(setup_dat_file);
+        if(dat_stream.fail()) {
+            throw std::runtime_error("PVSS Setup File Error!");
+        }
+
+        std::vector<optrand_crypto::pvss_aggregate_t> agg_vec;
+        optrand_crypto::deserializeVector(dat_stream, agg_vec);
+        dat_stream.close();
+
+        for(uint32_t i = 0; i < agg_vec.size(); i++) {
+            agg_queue[i] = agg_vec[i];
+
+            // Replica 0 is the proposer of view 1
+            view_agg_transcripts[i+1] = agg_vec[i];
+        }
+
+    }
 
 void HotStuffCore::sanity_check_delivered(const block_t &blk) {
     if (!blk->delivered)
@@ -114,11 +135,9 @@ void HotStuffCore::check_commit(const block_t &blk) {
         blk->decision = 1;
         do_consensus(blk);
         LOG_PROTO("commit %s", std::string(*blk).c_str());
-
 //        for (size_t i = 0; i < blk->cmds.size(); i++)
 //            do_decide(Finality(id, 1, i, blk->height,
 //                                blk->cmds[i], blk->get_hash()));
-
     }
     b_exec = blk;
 }
@@ -127,7 +146,6 @@ void HotStuffCore::check_commit(const block_t &blk) {
 void HotStuffCore::_vote(const block_t &blk, ReplicaID proposer) {
     const auto &blk_hash = blk->get_hash();
     LOG_PROTO("vote for %s", get_hex10(blk_hash).c_str());
-
     Vote vote(id, blk_hash,
             create_part_cert(*priv_key, blk_hash, view), view, this);
 
@@ -141,6 +159,7 @@ void HotStuffCore::_vote(const block_t &blk, ReplicaID proposer) {
 
 block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
                             const std::vector<block_t> &parents,
+                            const optrand_crypto::pvss_aggregate_t &pvss_agg,
                             bytearray_t &&extra) {
     if (view_trans)
     {
@@ -150,14 +169,27 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     if (parents.empty())
         throw std::runtime_error("empty parents");
     for (const auto &_: parents) tails.erase(_);
+
+    // Convert aggregate PVSS to bytearray
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << pvss_agg;
+
+    auto str = ss.str();
+    bytearray_t agg_bytes(str.begin(), str.end());
+
     /* create the new block */
     block_t bnew = storage->add_blk(
         new Block(parents, cmds,
-            hqc.second->clone(), std::move(extra),
+            hqc.second->clone(), std::move(agg_bytes),
             parents[0]->height + 1,
             hqc.first,
             nullptr
         ));
+
+    bnew-> view = view;
+    view_agg_transcripts[view] = pvss_agg;
+
     const uint256_t bnew_hash = bnew->get_hash();
     bnew->self_qc = create_quorum_cert(bnew_hash, view);
     on_deliver_blk(bnew);
@@ -167,13 +199,13 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     if (bnew->height <= vheight)
         throw std::runtime_error("new block should be higher than vheight");
     vheight = bnew->height;
-
     finished_propose[bnew] = true;
-    view_proposals[view] = bnew;
-
     _vote(bnew, id);
     on_propose_(prop);
-    /* boradcast to other replicas */
+
+    last_proposed_view = view;
+
+    /* broadcast to other replicas */
     do_broadcast_proposal(prop);
     on_receive_view_proposal_(view);
 
@@ -195,7 +227,11 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     }
 
     block_t bnew = prop.blk;
-    if (finished_propose[bnew]) return;
+    if (finished_propose[bnew]) {
+        LOG_PROTO("proposal finished %s", std::string(prop).c_str());
+        return;
+    }
+
     sanity_check_delivered(bnew);
     if (bnew->qc_ref)
         update_hqc(bnew->qc_ref, bnew->qc);
@@ -229,8 +265,23 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     LOG_PROTO("now state: %s", std::string(*this).c_str());
     if (bnew->qc_ref)
         on_qc_finish(bnew->qc_ref);
+
+    std::string str(bnew->extra.begin(), bnew->extra.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_aggregate_t agg;
+
+    ss >> agg;
+
+    if(!pvss_context.verify_aggregation(agg)) {
+        throw std::runtime_error("PVSS verification failed on_receive_proposal");
+    }
+
+    bnew->view = view;
+    view_agg_transcripts[view] = agg;
+
     finished_propose[bnew] = true;
-    view_proposals[view] = bnew;
 
     on_receive_proposal_(prop);
     on_receive_view_proposal_(view);
@@ -278,22 +329,57 @@ void HotStuffCore::on_receive_vote(const Vote &vote) {
 
 void HotStuffCore::on_receive_status(const Status &status) {
     LOG_PROTO("got %s", std::string(status).c_str());
-    if(status.view < view) return;
+    if(status.view < view || last_proposed_view >= view)
+        return;
 
     block_t blk = get_delivered_blk(status.qc->get_obj_hash());
 
     auto &blk_qc = blk->self_qc;
     blk_qc = status.qc->clone();
     update_hqc(blk, blk_qc);
+
+    if (!status_received[status.view].insert(status.replicaID).second)
+    {
+        LOG_WARN("duplicate status for view %d from %d", status.view, status.replicaID);
+        return;
+    }
+
+    std::string str(status.pvss_transcript.begin(), status.pvss_transcript.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_sharing_t pvss_recv;
+
+    ss >> pvss_recv;
+
+    if(!pvss_context.verify_sharing(pvss_recv)){
+        throw std::runtime_error("PVSS Verification failed in status");
+    }
+
+    view_transcripts[status.view].push_back(pvss_recv);
+    transcript_ids[status.view].push_back((size_t) status.replicaID);
+
+    size_t nmajority = config.nmajority;
+    size_t qsize = status_received[status.view].size();
+
+    bool is_hqc = get_hqc_qc()->get_view() + 1 == view;
+
+    if (qsize >= nmajority && is_hqc) {
+        auto agg = pvss_context.aggregate(view_transcripts[status.view], transcript_ids[status.view]);
+
+        if(!pvss_context.verify_aggregation(agg)){
+            LOG_WARN("Aggregation Verification failed in status View :%d", view);
+            return;
+        }
+        do_propose(agg);
+    }
 }
 
 
 void HotStuffCore::on_receive_qc(const quorum_cert_bt &qc){
     uint32_t _view = qc->get_view();
-
-    if (_view < view || last_view_cert_received >= view) return;
-
     LOG_PROTO("got QC view = %d", _view);
+    if (_view < view || last_view_cert_received >= view) return;
     last_view_cert_received = _view;
 
     block_t blk = get_delivered_blk(qc->get_obj_hash());
@@ -312,40 +398,116 @@ void HotStuffCore::on_receive_qc(const quorum_cert_bt &qc){
     }
 }
 
+void HotStuffCore::_update_agg_queue(const uint32_t _view){
+    if(_view < config.nmajority) return;
+    auto to_update_view = _view - config.nmajority + 1;
+    auto to_update_proposer = get_proposer(to_update_view);
+    agg_queue[to_update_proposer] = view_agg_transcripts[to_update_view];
 
-void HotStuffCore::_broadcast_share(const uint32_t view){
+}
+
+void HotStuffCore::on_receive_beacon(const Beacon &beacon){
+    LOG_PROTO("got %s", std::string(beacon).c_str());
+    if (beacon.view < view || last_view_beacon_received <= beacon.view) return;
+
+    std::string str(beacon.bt.begin(), beacon.bt.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::beacon_t beacon1;
+    ss >> beacon1;
+
+    auto proposer = get_proposer(beacon.view);
+    if(!pvss_context.verify_beacon(agg_queue[proposer], beacon1)){
+        throw std::runtime_error("Beacon Verification failed.");
+        return;
+    }
+    LOG_WARN("beacon view %d", beacon.view);
+    last_view_beacon_received = view;
+}
+
+
+void HotStuffCore::_broadcast_share(const uint32_t _view){
+    ReplicaID proposer = get_proposer(_view);
+
+    auto agg = agg_queue[proposer];
+    auto decryption = pvss_context.decrypt(agg);
+
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << decryption;
+
+    auto str = ss.str();
+    bytearray_t dec_bytes(str.begin(), str.end());
+
     DataStream p;
-    p << 0;
-    //Todo: Add logic for reconstruction and compute hash of the message
-    Share share(id, create_part_cert(*priv_key, p.get_hash(), view), view, this);
+    p << view;
+
+    Share share(id, create_part_cert(*priv_key, p.get_hash(), view), view, std::move(dec_bytes), this);
 
     on_receive_share(share);
     do_broadcast_share(share);
+
 }
 
 void HotStuffCore::on_receive_share(const Share &share){
     LOG_PROTO("got %s", std::string(share).c_str());
     LOG_PROTO("now state: %s", std::string(*this).c_str());
-    if(share.view < view) return;
+    if(share.view < last_view_beacon_received) return;
     size_t qsize = view_shares[share.view].size();
+
     if (qsize >= config.nmajority) return;
-    if (!view_shares[share.view].insert(share.replicaId).second)
-    {
-        LOG_WARN("duplicate share for %d from %d", view, share.replicaId);
-        return;
+
+    std::string str(share.bt.begin(), share.bt.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::decryption_t dec_share;
+
+    ss >> dec_share;
+
+    ReplicaID proposer = get_proposer(share.view);
+
+    if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
+        throw std::runtime_error("Decryption Verification failed in View");
     }
+    view_shares[share.view].push_back(dec_share);
+
     if (qsize + 1 == config.nmajority){
         //Todo: reconstruct the secret and broadcast it.
+        auto beacon = pvss_context.reconstruct(view_shares[share.view]);
+
+        if(!pvss_context.verify_beacon(agg_queue[proposer], beacon)){
+            throw std::runtime_error("Beacon Verification failed.");
+            return;
+        }
+
+        std::stringstream ss2;
+        ss2.str(std::string{});
+        ss2 << beacon;
+
+        auto str = ss2.str();
+        bytearray_t beacon_bytes(str.begin(), str.end());
+
+        Beacon beacon1(id, view, std::move(beacon_bytes), this);
+        do_broadcast_beacon(beacon1);
+        // Not a warning; just using LOG_WARN to print beacon output.
+        LOG_WARN("beacon view %d", share.view);
         last_view_shares_received = view;
+        last_view_beacon_received = view;
     }
 }
 
 void HotStuffCore::_enter_view() {
+    _update_agg_queue(view);
+    _broadcast_share(view);
+
     view += 1;
     enter_view(view);
     set_view_timer(11 * config.delta);
     set_qc_receive_timer(view, 8*config.delta);
     on_enter_view(view);
+
 }
 
 void HotStuffCore::_deliver_proposal(const Proposal &prop) {
@@ -463,6 +625,7 @@ void HotStuffCore::on_receive_proposal_echo(const Echo &echo){
         d >> prop;
         if(!prop.blk->delivered)
             on_deliver_blk(prop.blk);
+
         on_receive_proposal(prop);
     }
 }
@@ -518,19 +681,32 @@ void HotStuffCore::on_commit_timeout(const block_t &blk) { check_commit(blk); }
 
 void HotStuffCore::on_propose_timeout() {
     //Todo: Add logic to propose.
-//    do_propose();
+    size_t nmajority = config.nmajority;
+    size_t qsize = status_received[view].size();
+
+    if (qsize < config.nmajority){
+        LOG_WARN("Insufficient status messages; Timing error");
+    }
+
+    auto agg = pvss_context.aggregate(view_transcripts[view], transcript_ids[view]);
+
+    if(!pvss_context.verify_aggregation(agg)){
+        throw std::runtime_error("Aggregation Verification failed in status");
+    }
+
+    do_propose(agg);
 }
 
 void HotStuffCore::on_view_timeout() {
 
-    if(view > config.nmajority) {
-        block_t blk = view_proposals[view - config.nmajority];
-        if(blk->decision != 1){
-            //Todo: remove the leader of the block
-        } else{
-            // Todo: fetch the sharing and multicast it.
-        }
-    }
+//    if(view > config.nmajority) {
+//        block_t blk = view_proposals[view - config.nmajority];
+//        if(blk->decision != 1){
+//            //Todo: remove the leader of the block
+//        } else{
+//            // Todo: fetch the sharing and multicast it.
+//        }
+//    }
     _enter_view();
 }
 
@@ -577,7 +753,9 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     last_view_cert_received = 0;
     last_view_shares_received = 0;
     last_cert_delivered_view = 0;
-    qc_received_timeout_view = 0;
+    last_proposed_view = 0;
+    last_view_beacon_received = 0;
+
 }
 
 void HotStuffCore::prune(uint32_t staleness) {
@@ -720,10 +898,15 @@ void HotStuffCore::on_view_change() {
 void HotStuffCore::on_enter_view(const uint32_t _view) {
     view_waiting[_view].resolve();
 
+    // PVSS sharing
+    auto sharing = pvss_context.create_sharing();
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << sharing;
+    auto str = ss.str();
+    bytearray_t transcript(str.begin(), str.end());
 
-//    check_commit();
-
-    Status status(id, hqc.second->clone(), view, this);
+    Status status(id, hqc.second->clone(), view, std::move(transcript), this);
     do_status(status);
     schedule_propose(2*config.delta);
 }

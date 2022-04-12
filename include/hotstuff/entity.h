@@ -143,6 +143,7 @@ class Block {
     int8_t decision;
 
     std::unordered_set<ReplicaID> voted;
+    uint32_t view;
 
     public:
     Block():

@@ -105,6 +105,16 @@ struct MsgShare {
     void postponed_parse(HotStuffCore *hsc);
 };
 
+struct MsgBeacon {
+    static const opcode_t opcode = 0x10;
+    DataStream serialized;
+    Beacon beacon;
+    MsgBeacon(const Beacon &);
+    MsgBeacon(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+
 struct MsgEcho {
     static const opcode_t opcode = 0x5;
     DataStream serialized;
@@ -230,11 +240,6 @@ class HotStuffBase: public HotStuffCore {
     mutable double part_delivery_time_max;
     mutable std::unordered_map<const NetAddr, uint32_t> part_fetched_replica;
 
-    uint32_t last_proposed_view;
-
-    std::unordered_map<uint32_t, std::unordered_set<ReplicaID>> status_received;
-
-
 #ifdef SYNCHS_LATBREAKDOWN
     struct CmdLatStat {
         double proposed;
@@ -273,6 +278,7 @@ class HotStuffBase: public HotStuffCore {
 
     inline void qc_handler(MsgQC &&, const Net::conn_t &);
     inline void share_handler(MsgShare &&, const Net::conn_t &);
+    inline void beacon_handler(MsgBeacon &&, const Net::conn_t &);
     inline void echo_handler(MsgEcho &&, const Net::conn_t &);
     inline void echo2_handler(MsgEcho2 &&, const Net::conn_t &);
 
@@ -324,7 +330,6 @@ class HotStuffBase: public HotStuffCore {
 
     void do_decide(Finality &&) override;
     void do_consensus(const block_t &blk) override;
-    void do_propose();
 
     void block_fetched(const block_t &blk, ReplicaID replicaId) override;
 
@@ -346,6 +351,10 @@ class HotStuffBase: public HotStuffCore {
         _do_broadcast<Echo, MsgEcho>(echo);
     }
 
+    void do_broadcast_beacon(const Beacon &beacon) override {
+        _do_broadcast<Beacon, MsgBeacon>(beacon);
+    }
+
     void do_echo(const Echo &echo, ReplicaID dest) override {
         pn.send_msg(MsgEcho(echo), get_config().get_addr(dest));
     }
@@ -358,9 +367,10 @@ class HotStuffBase: public HotStuffCore {
         pn.send_msg(MsgEcho2(echo), get_config().get_addr(dest));
     }
 
+    void do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg) override;
+
     void schedule_propose(double t_sec) override;
 
-    void process_status(Status &status);
 
     protected:
 
@@ -374,6 +384,8 @@ class HotStuffBase: public HotStuffCore {
             privkey_bt &&priv_key,
             NetAddr listen_addr,
             pacemaker_bt pmaker,
+            const optrand_crypto::Context &pvss_ctx,
+            const string setup_dat_file,
             EventContext ec,
             size_t nworker,
             const Net::Config &netconfig);
@@ -391,8 +403,6 @@ class HotStuffBase: public HotStuffCore {
     const auto &get_decision_waiting() const { return decision_waiting; }
     const auto &get_blk_size() const { return blk_size; }
     const auto &get_cmd_pending_size() const { return cmd_pending_buffer.size(); }
-    const auto &get_proposed_view() { return last_proposed_view; }
-    void set_proposed_view(const uint32_t _view) { last_proposed_view = _view; }
     ThreadCall &get_tcall() { return tcall; }
     PaceMaker *get_pace_maker() { return pmaker.get(); }
     void print_stat() const;
@@ -452,6 +462,8 @@ class HotStuff: public HotStuffBase {
             const bytearray_t &raw_privkey,
             NetAddr listen_addr,
             pacemaker_bt pmaker,
+            const optrand_crypto::Context &pvss_ctx,
+            const string setup_dat_file,
             EventContext ec = EventContext(),
             size_t nworker = 4,
             const Net::Config &netconfig = Net::Config()):
@@ -460,9 +472,13 @@ class HotStuff: public HotStuffBase {
                     new PrivKeyType(raw_privkey),
                     listen_addr,
                     std::move(pmaker),
+                    pvss_ctx,
+                    setup_dat_file,
                     ec,
                     nworker,
-                    netconfig) {}
+                    netconfig) {
+
+    }
 
     void start(const std::vector<std::tuple<NetAddr, bytearray_t, bytearray_t>> &replicas,
                 double delta, bool ec_loop = false) {
