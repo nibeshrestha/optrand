@@ -60,3 +60,4 @@ if __name__ == "__main__":
         r_conf.write("idx = {}\n".format(r[3]))
         r_conf.write("pvss-ctx = pvss-sec{}.conf\n".format(r[3]))
         r_conf.write("pvss-dat = pvss-setup.dat\n".format(r[3]))
+        r_conf.write("stat-period = -1\n")
