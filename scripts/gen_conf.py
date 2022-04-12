@@ -49,6 +49,8 @@ if __name__ == "__main__":
         main_conf.write("block-size = {}\n".format(args.block_size))
     if not (args.pace_maker is None):
         main_conf.write("pace-maker = {}\n".format(args.pace_maker))
+    main_conf.write("stat-period = -1\n")
+    main_conf.write("nworker = 2\n")
     for r in zip(replicas, keys, tls_keys, itertools.count(0)):
         main_conf.write("replica = {}, {}, {}\n".format(r[0], r[1][0], r[2][2]))
         r_conf_name = "{}-sec{}.conf".format(prefix, r[3])
@@ -60,4 +62,4 @@ if __name__ == "__main__":
         r_conf.write("idx = {}\n".format(r[3]))
         r_conf.write("pvss-ctx = pvss-sec{}.conf\n".format(r[3]))
         r_conf.write("pvss-dat = pvss-setup.dat\n".format(r[3]))
-        r_conf.write("stat-period = -1\n")
+
