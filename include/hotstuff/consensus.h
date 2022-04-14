@@ -781,12 +781,26 @@ struct Ack: public Serializable {
     }
 };
 
+//    std::string str(share.bt.begin(), share.bt.end());
+//    std::stringstream ss;
+//    ss.str(str);
+//
+//    optrand_crypto::decryption_t dec_share;
+//
+//    ss >> dec_share;
+//
+//    ReplicaID proposer = get_proposer(share.view);
+//
+//    if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
+//    throw std::runtime_error("Decryption Verification failed in View");
+//}
+
 
 /** Abstraction for share messages to send secret shares. */
 struct Share: public Serializable {
     ReplicaID replicaId;
     /** proof of validity for the share */
-    part_cert_bt cert;
+//    part_cert_bt cert;
 
     uint32_t view;
 
@@ -796,19 +810,20 @@ struct Share: public Serializable {
     /** handle of the core object to allow polymorphism */
     HotStuffCore *hsc;
 
-    Share(): cert(nullptr), hsc(nullptr) {}
+//    Share(): cert(nullptr), hsc(nullptr) {}
+    Share():  hsc(nullptr) {}
     Share(ReplicaID replicaId,
-        part_cert_bt &&cert,
+//        part_cert_bt &&cert,
         const uint32_t &view,
         bytearray_t &&bt,
         HotStuffCore *hsc):
             replicaId(replicaId),
-            cert(std::move(cert)),
+//            cert(std::move(cert)),
             view(view), bt(std::move(bt)), hsc(hsc) {}
 
     Share(const Share &other):
             replicaId(other.replicaId),
-            cert(other.cert ? other.cert->clone() : nullptr),
+//            cert(other.cert ? other.cert->clone() : nullptr),
             view(other.view), bt(std::move(other.bt)),
             hsc(other.hsc) {}
 
@@ -817,7 +832,7 @@ struct Share: public Serializable {
     void serialize(DataStream &s) const override {
         s << replicaId << view;
         s << htole((uint32_t)bt.size()) << bt;
-        s << *cert;
+//        s << *cert;
     }
 
     void unserialize(DataStream &s) override {
@@ -830,7 +845,7 @@ struct Share: public Serializable {
         auto base = s.get_data_inplace(n);
         bt = bytearray_t(base, base + n);
 
-        cert = hsc->parse_part_cert(s);
+//        cert = hsc->parse_part_cert(s);
     }
 
     static uint256_t proof_obj_hash(const uint256_t &blk_hash) {
@@ -841,14 +856,16 @@ struct Share: public Serializable {
 
     bool verify() const {
         assert(hsc != nullptr);
-        return cert->verify(hsc->get_config().get_pubkey(replicaId));
+        return true;
+//        return cert->verify(hsc->get_config().get_pubkey(replicaId));
     }
 
     promise_t verify(VeriPool &vpool) const {
         assert(hsc != nullptr);
-        return cert->verify(hsc->get_config().get_pubkey(replicaId), vpool).then([this](bool result) {
-            return result;
-        });
+        return promise_t([](promise_t &pm){ pm.resolve(true); });
+//        return cert->verify(hsc->get_config().get_pubkey(replicaId), vpool).then([this](bool result) {
+//            return result;
+//        });
     }
 
     operator std::string () const {
