@@ -360,8 +360,7 @@ void HotStuffCore::on_receive_status(const Status &status) {
         auto agg = pvss_context.aggregate(view_transcripts[status.view], transcript_ids[status.view]);
 
         if(!pvss_context.verify_aggregation(agg)){
-            LOG_WARN("Aggregation Verification failed in status View :%d", view);
-            return;
+            throw std::runtime_error("Aggregation Verification failed in status");
         }
         do_propose(agg);
     }
@@ -464,10 +463,11 @@ void HotStuffCore::_broadcast_share(const uint32_t _view){
     auto str = ss.str();
     bytearray_t dec_bytes(str.begin(), str.end());
 
-    DataStream p;
-    p << view;
+//    DataStream p;
+//    p << view;
 
-    Share share(id, create_part_cert(*priv_key, p.get_hash(), view), view, std::move(dec_bytes), this);
+//    Share share(id, create_part_cert(*priv_key, p.get_hash(), view), view, std::move(dec_bytes), this);
+    Share share(id, view, std::move(dec_bytes), this);
 
     on_receive_share(share);
     do_broadcast_share(share);
@@ -492,7 +492,8 @@ void HotStuffCore::on_receive_share(const Share &share){
 
     ReplicaID proposer = get_proposer(share.view);
 
-    if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
+//    if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
+    if(!share.verify()){
         throw std::runtime_error("Decryption Verification failed in View");
     }
     view_shares[share.view].push_back(dec_share);
