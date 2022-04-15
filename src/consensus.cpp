@@ -903,16 +903,17 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
     Status status(id, hqc.second->clone(), view, this);
     do_status(status);
 
-    auto dest = (id + _view) % config.nreplicas;
-    int mul = (_view - 1) / config.nreplicas;
-    auto for_view =  (2 + mul ) * config.nreplicas + dest + 1;
+    auto nreplicas = config.nreplicas;
+    auto dest = (id + _view) % nreplicas;
+    int mul = (_view - 1) / nreplicas;
+    auto for_view =  (2 + mul ) * nreplicas + dest + 1;
 
     // PVSS sharing
     auto sharing = pvss_context.create_sharing();
     if (dest == id) {
         view_transcripts[for_view].push_back(sharing);
         transcript_ids[for_view].push_back(id);
-    }else {
+    }else if ((dest + nreplicas - id) % nreplicas > (config.nmajority-1)) {
         std::stringstream ss;
         ss.str(std::string{});
         ss << sharing;
