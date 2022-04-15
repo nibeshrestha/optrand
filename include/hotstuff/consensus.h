@@ -51,6 +51,7 @@ struct Ack;
 struct Share;
 struct Echo;
 struct Beacon;
+struct PVSSTranscript;
 
 /** Abstraction for HotStuff protocol state machine (without network implementation). */
 class HotStuffCore {
@@ -100,6 +101,7 @@ class HotStuffCore {
     void on_view_change();
     void on_receive_qc_(uint32_t _view);
     void on_receive_view_proposal_(uint32_t _view);
+
     void _vote(const block_t &blk, ReplicaID dest);
     void _ack(const block_t &blk);
     void _deliver_proposal(const Proposal &prop);
@@ -183,6 +185,7 @@ protected:
     void on_receive_proposal_echo(const Echo &echo);
     void on_receive_cert_echo(const Echo &echo);
     void on_receive_beacon(const Beacon &beacon);
+    void on_receive_pvss_transcript(const PVSSTranscript &pvss_transcript);
 
 
     /** Call to submit new commands to be decided (executed). "Parents" must
@@ -190,7 +193,6 @@ protected:
      * while the others are uncles/aunts */
     block_t on_propose(const std::vector<uint256_t> &cmds,
                     const std::vector<block_t> &parents,
-                    const optrand_crypto::pvss_aggregate_t &pvss_agg,
                     bytearray_t &&extra = bytearray_t());
 
 
@@ -229,7 +231,8 @@ protected:
     virtual void do_echo(const Echo &echo, ReplicaID dest) = 0;
     virtual void do_broadcast_echo2(const Echo &echo) = 0;
     virtual void do_echo2(const Echo &echo, ReplicaID dest) = 0;
-    virtual void do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg) = 0;
+    virtual void do_propose() = 0;
+    virtual void do_send_pvss_transcript(const PVSSTranscript &pvss_transcript, ReplicaID dest) = 0;
 
 
     virtual void schedule_propose(double t_sec) = 0;
@@ -420,40 +423,30 @@ struct Status: public Serializable {
     ReplicaID replicaID;
     uint32_t view;
     quorum_cert_bt qc;
-    bytearray_t pvss_transcript;
-
-    // Todo: add PVSS vector
 
     /** handle of the core object to allow polymorphism */
     HotStuffCore *hsc;
 
     Status(): qc(nullptr), hsc(nullptr) {}
     Status(ReplicaID replicaID, quorum_cert_bt &&qc,
-           uint32_t view, bytearray_t &&pvss_transcript, HotStuffCore *hsc):
-            replicaID(replicaID), qc(std::move(qc)), view(view), pvss_transcript(std::move(pvss_transcript)), hsc(hsc) {}
+           uint32_t view, HotStuffCore *hsc):
+            replicaID(replicaID), qc(std::move(qc)), view(view), hsc(hsc) {}
 
     Status(const Status &other):
             replicaID(replicaID),
             qc(other.qc ? other.qc->clone() : nullptr),
-            view(other.view), pvss_transcript(std::move(other.pvss_transcript)),hsc(other.hsc) {}
+            view(other.view),hsc(other.hsc) {}
 
     Status(Status &&other) = default;
     
     void serialize(DataStream &s) const override {
         s << view << replicaID;
-        s << htole((uint32_t)pvss_transcript.size()) << pvss_transcript;
         s << *qc;
     }
 
     void unserialize(DataStream &s) override {
-        uint32_t n;
         s >> view;
         s >> replicaID;
-
-        s >> n;
-        n = letoh(n);
-        auto base = s.get_data_inplace(n);
-        pvss_transcript = bytearray_t(base, base + n);
 
         qc = hsc->parse_quorum_cert(s);
     }
@@ -482,6 +475,47 @@ struct Status: public Serializable {
           << "view=" << std::to_string(view) << ">";
         return std::move(s);
     }
+};
+
+struct PVSSTranscript: public Serializable {
+    ReplicaID replicaID;
+    uint32_t for_view;
+    bytearray_t pvss_transcript;
+
+    PVSSTranscript() {}
+    PVSSTranscript(ReplicaID replicaID, uint32_t for_view, bytearray_t &&pvss_transcript):
+    replicaID(replicaID), for_view(for_view), pvss_transcript(std::move(pvss_transcript)) {}
+
+    PVSSTranscript(const PVSSTranscript &other):
+            replicaID(other.replicaID),
+            for_view(other.for_view), pvss_transcript(std::move(other.pvss_transcript)) {}
+
+    PVSSTranscript(PVSSTranscript &&other) = default;
+
+    void serialize(DataStream &s) const override {
+        s << for_view << replicaID;
+        s << htole((uint32_t)pvss_transcript.size()) << pvss_transcript;
+    }
+
+    void unserialize(DataStream &s) override {
+        uint32_t n;
+        s >> for_view;
+        s >> replicaID;
+
+        s >> n;
+        n = letoh(n);
+        auto base = s.get_data_inplace(n);
+        pvss_transcript = bytearray_t(base, base + n);
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<pvss-transcript "
+          << "rid=" << std::to_string(replicaID) << " "
+          << "for_view=" << std::to_string(for_view) << ">";
+        return std::move(s);
+    }
+
 };
 
 struct Blame: public Serializable {

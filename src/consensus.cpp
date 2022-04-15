@@ -160,7 +160,6 @@ void HotStuffCore::_vote(const block_t &blk, ReplicaID proposer) {
 
 block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
                             const std::vector<block_t> &parents,
-                            const optrand_crypto::pvss_aggregate_t &pvss_agg,
                             bytearray_t &&extra) {
     if (view_trans)
     {
@@ -171,6 +170,7 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
         throw std::runtime_error("empty parents");
     for (const auto &_: parents) tails.erase(_);
 
+    auto pvss_agg = view_agg_transcripts[view];
     // Convert aggregate PVSS to bytearray
     std::stringstream ss;
     ss.str(std::string{});
@@ -189,7 +189,6 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
         ));
 
     bnew-> view = view;
-    view_agg_transcripts[view] = pvss_agg;
 
     const uint256_t bnew_hash = bnew->get_hash();
     bnew->self_qc = create_quorum_cert(bnew_hash, view);
@@ -324,6 +323,9 @@ void HotStuffCore::on_receive_status(const Status &status) {
     if(status.view < view || last_proposed_view >= view)
         return;
 
+    size_t qsize = status_received[status.view].size();
+    if (qsize >= config.nmajority) return;
+
     block_t blk = get_delivered_blk(status.qc->get_obj_hash());
 
     auto &blk_qc = blk->self_qc;
@@ -336,34 +338,9 @@ void HotStuffCore::on_receive_status(const Status &status) {
         return;
     }
 
-    std::string str(status.pvss_transcript.begin(), status.pvss_transcript.end());
-    std::stringstream ss;
-    ss.str(str);
-
-    optrand_crypto::pvss_sharing_t pvss_recv;
-
-    ss >> pvss_recv;
-
-    if(!pvss_context.verify_sharing(pvss_recv)){
-        throw std::runtime_error("PVSS Verification failed in status");
-    }
-
-    view_transcripts[status.view].push_back(pvss_recv);
-    transcript_ids[status.view].push_back((size_t) status.replicaID);
-
-    size_t nmajority = config.nmajority;
-    size_t qsize = status_received[status.view].size();
-
     bool is_hqc = get_hqc_qc()->get_view() + 1 == view;
 
-    if (qsize >= nmajority && is_hqc) {
-        auto agg = pvss_context.aggregate(view_transcripts[status.view], transcript_ids[status.view]);
-
-        if(!pvss_context.verify_aggregation(agg)){
-            throw std::runtime_error("Aggregation Verification failed in status");
-        }
-        do_propose(agg);
-    }
+    if (qsize + 1 == config.nmajority && is_hqc) do_propose();
 }
 
 
@@ -700,6 +677,36 @@ void HotStuffCore::on_receive_cert_echo(const Echo &echo){
     }
 }
 
+void HotStuffCore::on_receive_pvss_transcript(const PVSSTranscript &ptrans){
+    LOG_PROTO("got %s", std::string(ptrans).c_str());
+    size_t qsize = transcript_ids[ptrans.for_view].size();
+
+    if(qsize >= config.nmajority) return;
+
+    std::string str(ptrans.pvss_transcript.begin(), ptrans.pvss_transcript.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_sharing_t pvss_recv;
+
+    ss >> pvss_recv;
+
+    if(!pvss_context.verify_sharing(pvss_recv)){
+        throw std::runtime_error("PVSS Verification failed in status");
+    }
+
+    view_transcripts[ptrans.for_view].push_back(pvss_recv);
+    transcript_ids[ptrans.for_view].push_back((size_t) ptrans.replicaID);
+
+    if (qsize + 1 == config.nmajority) {
+        auto agg = pvss_context.aggregate(view_transcripts[ptrans.for_view], transcript_ids[ptrans.for_view]);
+        if(!pvss_context.verify_aggregation(agg)){
+            throw std::runtime_error("Aggregation Verification failed in status");
+        }
+        view_agg_transcripts[ptrans.for_view] = agg;
+    }
+}
+
 void HotStuffCore::on_commit_timeout(const block_t &blk) { check_commit(blk); }
 
 void HotStuffCore::on_propose_timeout() {
@@ -711,14 +718,7 @@ void HotStuffCore::on_propose_timeout() {
         LOG_WARN("Insufficient status messages; Timing error");
     }
 
-    auto agg = pvss_context.aggregate(view_transcripts[view], transcript_ids[view]);
-
-    if(!pvss_context.verify_aggregation(agg)){
-        LOG_WARN("Aggregation Verification failed in status Idx: %d View :%d", view);
-        return;
-    }
-
-    do_propose(agg);
+    do_propose();
 }
 
 void HotStuffCore::on_viewtrans_timeout() {
@@ -901,16 +901,28 @@ void HotStuffCore::on_view_change() {
 void HotStuffCore::on_enter_view(const uint32_t _view) {
     view_waiting[_view].resolve();
 
+    Status status(id, hqc.second->clone(), view, this);
+    do_status(status);
+
+    auto dest = (id + _view) % config.nreplicas;
+    int mul = (_view - 1) / 3;
+    auto for_view =  (2 + mul ) * config.nreplicas + dest + 1;
+
     // PVSS sharing
     auto sharing = pvss_context.create_sharing();
-    std::stringstream ss;
-    ss.str(std::string{});
-    ss << sharing;
-    auto str = ss.str();
-    bytearray_t transcript(str.begin(), str.end());
+    if (dest == id) {
+        view_transcripts[for_view].push_back(sharing);
+        transcript_ids[for_view].push_back(id);
+    }else {
+        std::stringstream ss;
+        ss.str(std::string{});
+        ss << sharing;
+        auto str = ss.str();
+        bytearray_t transcript(str.begin(), str.end());
 
-    Status status(id, hqc.second->clone(), view, std::move(transcript), this);
-    do_status(status);
+        PVSSTranscript ptrans(id, for_view, std::move(transcript));
+        do_send_pvss_transcript(ptrans, dest);
+    }
     schedule_propose(2*config.delta);
 }
 
