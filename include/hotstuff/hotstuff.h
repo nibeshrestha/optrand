@@ -133,6 +133,15 @@ struct MsgEcho2 {
     void postponed_parse(HotStuffCore *hsc);
 };
 
+struct MsgPVSSTranscript {
+    static const opcode_t opcode = 0x11;
+    DataStream serialized;
+    PVSSTranscript ptrans;
+    MsgPVSSTranscript(const PVSSTranscript &);
+    MsgPVSSTranscript(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
 
 using promise::promise_t;
 
@@ -270,6 +279,7 @@ class HotStuffBase: public HotStuffCore {
     /** deliver consensus message: <vote> */
     inline void vote_handler(MsgVote &&, const Net::conn_t &);
     inline void status_handler(MsgStatus &&, const Net::conn_t &);
+    inline void pvss_transcript_handler(MsgPVSSTranscript &&, const Net::conn_t &);
 
     /** fetches full block data */
     inline void req_blk_handler(MsgReqBlock &&, const Net::conn_t &);
@@ -367,7 +377,11 @@ class HotStuffBase: public HotStuffCore {
         pn.send_msg(MsgEcho2(echo), get_config().get_addr(dest));
     }
 
-    void do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg) override;
+    void do_send_pvss_transcript(const PVSSTranscript &pvss_transcript, ReplicaID dest) override {
+        pn.send_msg(MsgPVSSTranscript(pvss_transcript), get_config().get_addr(dest));
+    }
+
+    void do_propose() override;
 
     void schedule_propose(double t_sec) override;
 

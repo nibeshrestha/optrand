@@ -70,6 +70,12 @@ MsgRespBlock::MsgRespBlock(const std::vector<block_t> &blks) {
     for (auto blk: blks) serialized << *blk;
 }
 
+const opcode_t MsgPVSSTranscript::opcode;
+MsgPVSSTranscript::MsgPVSSTranscript(const PVSSTranscript &ptrans) { serialized << ptrans; }
+void MsgPVSSTranscript::postponed_parse(HotStuffCore *hsc) {
+    serialized >> ptrans;
+}
+
 void MsgRespBlock::postponed_parse(HotStuffCore *hsc) {
     uint32_t size;
     serialized >> size;
@@ -388,6 +394,15 @@ void HotStuffBase::block_fetched(const block_t &blk, ReplicaID replicaId) {
     });
 }
 
+void HotStuffBase::pvss_transcript_handler(MsgPVSSTranscript &&msg, const Net::conn_t &conn) {
+    const NetAddr &peer = conn->get_peer_addr();
+    if (peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<PVSSTranscript> n(new PVSSTranscript(std::move(msg.ptrans)));
+    on_receive_pvss_transcript(*n);
+
+}
+
 void HotStuffBase::set_commit_timer(const block_t &blk, double t_sec) {
 #ifdef SYNCHS_NOTIMER
     on_commit_timeout(blk);
@@ -615,6 +630,7 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::beacon_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo2_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::pvss_transcript_handler, this, _1, _2));
     pn.start();
     pn.listen(listen_addr);
 
@@ -740,12 +756,13 @@ void HotStuffBase::schedule_propose(double t_sec) {
     set_propose_timer(t_sec);
 }
 
-void HotStuffBase::do_propose(const optrand_crypto::pvss_aggregate_t &pvss_agg){
+
+void HotStuffBase::do_propose(){
     ReplicaID proposer = pmaker->get_proposer();
     if(proposer != id || get_last_proposed_view() >= get_view()) return;
     stop_propose_timer();
 
-    on_propose(std::vector<uint256_t >{}, pmaker->get_parents(), pvss_agg);
+    on_propose(std::vector<uint256_t >{}, pmaker->get_parents());
 }
 
 

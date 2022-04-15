@@ -42,9 +42,11 @@ int main(int argc, char **argv) {
     std::vector<pvss_sharing_t> pvss_vec;
     std::vector<size_t> id_vec;
     std::vector<pvss_aggregate_t> agg_vec;
-    int k, f = (n - 1) / 2;
-    for (int i = 0; i < n; i++) {
+    int k, f = (n - 1) / 2, idx = 0;
 
+    // buffer 2n aggregated transcripts
+    for (int i = 0; i < 2*n; i++) {
+        idx = i % n;
         for (int j = i; j < i + f + 1; j++) {
             k = j % n;
             auto sharing = setup.at(k).create_sharing();
@@ -52,8 +54,8 @@ int main(int argc, char **argv) {
             id_vec.push_back(k);
         }
 
-        auto agg = setup.at(i).aggregate(pvss_vec, id_vec);
-        if (!setup.at(i).verify_aggregation(agg)) {
+        auto agg = setup.at(idx).aggregate(pvss_vec, id_vec);
+        if (!setup.at(idx).verify_aggregation(agg)) {
             throw std::runtime_error("aggregation verification failed");
         }
 
