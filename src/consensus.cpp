@@ -905,7 +905,7 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
     do_status(status);
 
     auto dest = (id + _view) % config.nreplicas;
-    int mul = (_view - 1) / 3;
+    int mul = (_view - 1) / config.nreplicas;
     auto for_view =  (2 + mul ) * config.nreplicas + dest + 1;
 
     // PVSS sharing
