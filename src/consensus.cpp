@@ -678,7 +678,7 @@ void HotStuffCore::on_receive_cert_echo(const Echo &echo){
 }
 
 void HotStuffCore::on_receive_pvss_transcript(const PVSSTranscript &ptrans){
-    LOG_WARN("got %s", std::string(ptrans).c_str());
+    LOG_PROTO("got %s", std::string(ptrans).c_str());
     size_t qsize = transcript_ids[ptrans.for_view].size();
 
     if(qsize >= config.nmajority) return;
@@ -711,7 +711,6 @@ void HotStuffCore::on_commit_timeout(const block_t &blk) { check_commit(blk); }
 
 void HotStuffCore::on_propose_timeout() {
     //Todo: Add logic to propose.
-    size_t nmajority = config.nmajority;
     size_t qsize = status_received[view].size();
 
     if (qsize < config.nmajority){
@@ -922,7 +921,6 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
 
         PVSSTranscript ptrans(id, for_view, std::move(transcript));
         do_send_pvss_transcript(ptrans, dest);
-        LOG_WARN("Sending PVSS transcipt for dest : %d, for_view :%d , view: %d", dest, for_view, _view);
     }
     schedule_propose(2*config.delta);
 }
