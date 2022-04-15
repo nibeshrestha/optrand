@@ -678,7 +678,7 @@ void HotStuffCore::on_receive_cert_echo(const Echo &echo){
 }
 
 void HotStuffCore::on_receive_pvss_transcript(const PVSSTranscript &ptrans){
-    LOG_PROTO("got %s", std::string(ptrans).c_str());
+    LOG_WARN("got %s", std::string(ptrans).c_str());
     size_t qsize = transcript_ids[ptrans.for_view].size();
 
     if(qsize >= config.nmajority) return;
