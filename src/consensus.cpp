@@ -912,7 +912,7 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
     if (dest == id) {
         view_transcripts[for_view].push_back(sharing);
         transcript_ids[for_view].push_back(id);
-    }else if (((dest + nreplicas - id) % nreplicas) <= config.nmajority){
+    }else {
         std::stringstream ss;
         ss.str(std::string{});
         ss << sharing;
