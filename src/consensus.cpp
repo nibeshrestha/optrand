@@ -922,6 +922,7 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
 
         PVSSTranscript ptrans(id, for_view, std::move(transcript));
         do_send_pvss_transcript(ptrans, dest);
+        LOG_WARN("Sending PVSS transcipt for dest : %d, for_view :%d , view: %d", dest, for_view, _view);
     }
     schedule_propose(2*config.delta);
 }
