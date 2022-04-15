@@ -469,8 +469,7 @@ void HotStuffCore::on_receive_share(const Share &share){
 
     ReplicaID proposer = get_proposer(share.view);
 
-//    if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
-    if(!share.verify()){
+    if(!pvss_context.verify_decryption(agg_queue[proposer], dec_share)){
         throw std::runtime_error("Decryption Verification failed in View");
     }
     view_shares[share.view].push_back(dec_share);
@@ -913,7 +912,7 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
     if (dest == id) {
         view_transcripts[for_view].push_back(sharing);
         transcript_ids[for_view].push_back(id);
-    }else {
+    }else if (((dest + nreplicas - id) % nreplicas) <= config.nmajority){
         std::stringstream ss;
         ss.str(std::string{});
         ss << sharing;
