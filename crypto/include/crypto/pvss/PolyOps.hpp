@@ -61,24 +61,34 @@ struct Polynomial {
     Fr get_secret() const { return coeffs.at(0); }
 
     template<class G>
-    static bool ensure_degree(std::vector<G> group, size_t degree, const Precomputes* precomputes = nullptr);
+    static bool ensure_degree(std::vector<G> group, size_t degree, 
+                                const Precomputes* precomputes = nullptr);
 
     template<class G>
-    static G lagrange_interpolation(const size_t degree, const std::vector<G>& evals);
+    static G lagrange_interpolation(const size_t degree, 
+                                        const std::vector<G>& evals, 
+                                        const Precomputes* precomputes = nullptr);
 
     template<class G>
-    static G lagrange_interpolation(const size_t degree, const std::vector<G>& evals, const std::vector<G>& points);
+    static G lagrange_interpolation(const size_t degree,    
+                                        const std::vector<G>& evals, 
+                                        const std::vector<G>& points,
+                                        const Precomputes* precomputes = nullptr);
 
 };
 
 template<class G>
 inline G Polynomial::lagrange_interpolation(const size_t degree, 
-                                            const std::vector<G>& evaluations) 
+                                            const std::vector<G>& evaluations,
+                                            const Precomputes* precomputes) 
 {
     if (evaluations.size() < degree+1) {
         throw std::runtime_error("insufficient evaluations");
     }
+    bool use_precomputes = precomputes != nullptr;
     G sum = G::zero();
+    std::vector<Fr> interpolants;
+    interpolants.reserve(degree+1);
     for(size_t j=0; j<=degree;j++) {
         Fr xj = static_cast<long>(j+1);
         Fr prod = Fr::one();
@@ -87,20 +97,40 @@ inline G Polynomial::lagrange_interpolation(const size_t degree,
                 continue;
             }
             Fr xm = static_cast<long>(m+1);
-            prod = (xm* ((xm-xj).inverse())) * prod;
+            if(use_precomputes) {
+                prod = (xm* precomputes->inverse_map.at(m+1).at(j+1)) * prod;
+            } else {
+                prod = (xm* ((xm-xj).inverse())) * prod;
+            }
         }
-        sum = sum + (prod*evaluations.at(j));
+        if(use_precomputes) {
+            interpolants.push_back(prod);
+        } else {
+            sum = sum + (prod*evaluations.at(j));
+        }
+    }
+    if(use_precomputes) {
+        return multiExp<G>(evaluations.begin(), 
+                            evaluations.begin()+static_cast<long>(degree+1), 
+                            interpolants.begin(), 
+                            interpolants.end());
     }
     return sum;
 }
 
 template<class G>
-static G lagrange_interpolation(const size_t degree, const std::vector<G>& evals, const std::vector<Fr>& points)
+static G lagrange_interpolation(const size_t degree, 
+                                    const std::vector<G>& evals, 
+                                    const std::vector<Fr>& points,
+                                    const Precomputes* precomputes)
 {
     if (evals.size() < degree+1) {
         throw std::runtime_error("insufficient evaluations");
     }
+    auto use_precomputes = precomputes != nullptr;
     G sum = G::zero();
+    std::vector<Fr> interpolants;
+    interpolants.reserve(degree+1);
     for(size_t j=0; j<=degree;j++) {
         Fr xj = points.at(j);
         Fr prod = Fr::one();
@@ -109,9 +139,23 @@ static G lagrange_interpolation(const size_t degree, const std::vector<G>& evals
                 continue;
             }
             Fr xm = points.at(m);
-            prod = (xm* ((xm-xj).inverse())) * prod;
+            if(use_precomputes) {
+                prod = (xm* precomputes->inverse_map.at(m+1).at(j+1)) * prod;
+            } else {
+                prod = (xm* ((xm-xj).inverse())) * prod;
+            }
         }
-        sum = sum + (prod*evals.at(j));
+        if(use_precomputes) {
+            interpolants.push_back(prod);
+        } else {
+            sum = sum + (prod*evals.at(j));
+        }
+    }
+    if(use_precomputes) {
+        return multiExp<G>(evals.begin(), 
+                            evals.begin()+static_cast<long>(degree+1), 
+                            interpolants.begin(), 
+                            interpolants.end());
     }
     return sum;
 }

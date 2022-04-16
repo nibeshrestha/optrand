@@ -79,7 +79,7 @@ inline beacon_t Context::reconstruct(const std::vector<decryption_t> &recon) con
         points.emplace_back(static_cast<long>(dec.origin+1));
         evals.emplace_back(dec.dec);
     }
-    auto point = lagrange_interpolation(config.num_faults(), evals, points);
+    auto point = lagrange_interpolation(config.num_faults(), evals, points, m_precomputes_.get());
     // e(h^s, g')
     auto beacon = libff::default_ec_pp::pairing(point, h2);
     return beacon_t{point, beacon};
@@ -137,7 +137,7 @@ inline bool Context::verify_aggregation(const pvss_aggregate_t &agg) const
     }
 
     // Decomposition proof check
-    auto point = Polynomial::lagrange_interpolation(config.num_faults(), agg.commitments);
+    auto point = Polynomial::lagrange_interpolation(config.num_faults(), agg.commitments, m_precomputes_.get());
     auto gs_prod = Com_Group::zero();
     for(auto& dec_i: agg.decomposition) {
         if(!dec_i.pi.verify(Com_generator, dec_i.gs)) {
@@ -172,7 +172,7 @@ inline bool Context::verify_sharing(const pvss_sharing_t &pvss) const
                                 }
     }
     // Check decomposition proof
-    auto point = Polynomial::lagrange_interpolation(config.num_faults(), pvss.commitments);
+    auto point = Polynomial::lagrange_interpolation(config.num_faults(), pvss.commitments, m_precomputes_.get());
     if(point != pvss.decomp_pi.gs) {
         std::cout << "gs check failed";
         return false;
