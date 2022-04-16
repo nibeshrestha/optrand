@@ -86,7 +86,6 @@ inline G Polynomial::lagrange_interpolation(const size_t degree,
         throw std::runtime_error("insufficient evaluations");
     }
     bool use_precomputes = precomputes != nullptr;
-    G sum = G::zero();
     std::vector<Fr> interpolants;
     interpolants.reserve(degree+1);
     for(size_t j=0; j<=degree;j++) {
@@ -103,19 +102,12 @@ inline G Polynomial::lagrange_interpolation(const size_t degree,
                 prod = (xm* ((xm-xj).inverse())) * prod;
             }
         }
-        if(use_precomputes) {
-            interpolants.push_back(prod);
-        } else {
-            sum = sum + (prod*evaluations.at(j));
-        }
+        interpolants.push_back(prod);
     }
-    if(use_precomputes) {
-        return multiExp<G>(evaluations.begin(), 
-                            evaluations.begin()+static_cast<long>(degree+1), 
-                            interpolants.begin(), 
-                            interpolants.end());
-    }
-    return sum;
+    return multiExp<G>(evaluations.begin(), 
+                        evaluations.begin()+static_cast<long>(degree+1), 
+                        interpolants.begin(), 
+                        interpolants.end());
 }
 
 template<class G>
@@ -128,7 +120,6 @@ static G lagrange_interpolation(const size_t degree,
         throw std::runtime_error("insufficient evaluations");
     }
     auto use_precomputes = precomputes != nullptr;
-    G sum = G::zero();
     std::vector<Fr> interpolants;
     interpolants.reserve(degree+1);
     for(size_t j=0; j<=degree;j++) {
@@ -145,19 +136,12 @@ static G lagrange_interpolation(const size_t degree,
                 prod = (xm* ((xm-xj).inverse())) * prod;
             }
         }
-        if(use_precomputes) {
-            interpolants.push_back(prod);
-        } else {
-            sum = sum + (prod*evals.at(j));
-        }
+        interpolants.push_back(prod);
     }
-    if(use_precomputes) {
-        return multiExp<G>(evals.begin(), 
-                            evals.begin()+static_cast<long>(degree+1), 
-                            interpolants.begin(), 
-                            interpolants.end());
-    }
-    return sum;
+    return multiExp<G>(evals.begin(), 
+                        evals.begin()+static_cast<long>(degree+1), 
+                        interpolants.begin(), 
+                        interpolants.end());
 }
 
 template<class G>
