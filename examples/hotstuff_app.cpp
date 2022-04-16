@@ -288,6 +288,8 @@ int main(int argc, char **argv) {
         throw std::runtime_error("PVSS Context File Error!");
 
     auto pvss_ctx = factory.parseContext(ctx_stream);
+//    pvss_ctx.initialize_precomputations();
+
     ctx_stream.close();
 
     // Nibesh: note to myself. Somehow passing std::vector<optrand_crypto::pvss_aggregate_t> to a function causing

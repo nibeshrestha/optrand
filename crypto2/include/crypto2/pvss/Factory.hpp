@@ -33,7 +33,7 @@ public:
 
         for(size_t i=0;i<m_config_.num_replicas(); i++) {
             auto ctx = Context{public_keys, m_config_, 
-                                    g1, g2, h1, h2, secret_keys.at(i), i};
+                                    g1, g2, h1, h2, secret_keys.at(i), i, nullptr};
             ret.push_back(ctx);
         }
         return ret;
@@ -70,7 +70,7 @@ public:
         in >> my_id;
         libff::consume_OUTPUT_NEWLINE(in);
 
-        return Context{pk_map, m_config_, g1, g2, h1, h2, secret_key, my_id};
+        return Context{pk_map, m_config_, g1, g2, h1, h2, secret_key, my_id, nullptr};
     }
 
 };

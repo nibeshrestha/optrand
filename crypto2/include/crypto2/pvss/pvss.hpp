@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <libff/common/default_types/ec_pp.hpp>
+#include <memory>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -18,6 +19,7 @@
 #include "Decryption.hpp"
 #include "Factory.hpp"
 #include "Beacon.hpp"
+#include "crypto2/pvss/Precomputes.hpp"
 #include "depends/ate-pairing/include/bn.h"
 
 #include <libff/common/serialization.hpp>
@@ -56,8 +58,14 @@ public:
 
     friend std::ostream& operator<<(std::ostream& os, const Context& ctx);
     friend Context parse_context(std::istream& in);
-};
 
+public:
+    std::shared_ptr<Precomputes> m_precomputes_ = nullptr;
+
+// Call if you want to improve run_time performance
+public:
+    void initialize_precomputations();
+};
 
 inline std::ostream& operator<< (std::ostream& os, const Context& ctx) {
 
@@ -75,6 +83,10 @@ inline std::ostream& operator<< (std::ostream& os, const Context& ctx) {
 
 }
 
+inline void Context::initialize_precomputations() {
+    m_precomputes_ = std::make_shared<Precomputes>(config.num_replicas(), config.num_faults());
+}
+
 inline beacon_t Context::reconstruct(const std::vector<decryption_t> &recon) const 
 {
     assert(recon.size()>config.num_faults());
@@ -86,7 +98,7 @@ inline beacon_t Context::reconstruct(const std::vector<decryption_t> &recon) con
         points.emplace_back(static_cast<long>(dec.origin+1));
         evals.emplace_back(dec.dec);
     }
-    auto point = lagrange_interpolation(config.num_faults(), evals, points);
+    auto point = lagrange_interpolation(config.num_faults(), evals, points, m_precomputes_.get());
     // e(h^s, g')
     auto beacon = libff::default_ec_pp::pairing(point, h2);
     return beacon_t{point, beacon};
@@ -129,7 +141,7 @@ inline bool Context::verify_aggregation(const pvss_aggregate_t &agg) const
     }
 
     // Coding check for the commitments
-    if (!Polynomial::ensure_degree(agg.commitments, config.num_faults())) {
+    if (!Polynomial::ensure_degree(agg.commitments, config.num_faults(), m_precomputes_.get())) {
         std::cout << "Degree check failed" << std::endl;
         return false;
     }
@@ -144,7 +156,7 @@ inline bool Context::verify_aggregation(const pvss_aggregate_t &agg) const
     }
 
     // Decomposition proof check
-    auto point = Polynomial::lagrange_interpolation(config.num_faults(), agg.commitments);
+    auto point = Polynomial::lagrange_interpolation(config.num_faults(), agg.commitments, m_precomputes_.get());
     auto gs_prod = Com_Group::zero();
     for(auto& dec_i: agg.decomposition) {
         if(!dec_i.pi.verify(Com_generator, dec_i.gs)) {
@@ -166,7 +178,7 @@ inline bool Context::verify_sharing(const pvss_sharing_t &pvss) const
             return false;
         }
     // Coding check for the commitments
-    if (!Polynomial::ensure_degree(pvss.commitments, config.num_faults())) {
+    if (!Polynomial::ensure_degree(pvss.commitments, config.num_faults(), m_precomputes_.get())) {
         std::cout << "Degree check failed" << std::endl;
         return false;
     }
@@ -179,7 +191,7 @@ inline bool Context::verify_sharing(const pvss_sharing_t &pvss) const
                                 }
     }
     // Check decomposition proof
-    auto point = Polynomial::lagrange_interpolation(config.num_faults(), pvss.commitments);
+    auto point = Polynomial::lagrange_interpolation(config.num_faults(), pvss.commitments, m_precomputes_.get());
     if(point != pvss.decomp_pi.gs) {
         std::cout << "gs check failed";
         return false;

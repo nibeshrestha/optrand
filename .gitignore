@@ -25,3 +25,4 @@ core
 .idea
 *.cbp
 log*
+*.cmake

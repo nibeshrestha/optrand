@@ -3,14 +3,15 @@
 #include <stdexcept>
 #include <vector>
 
-#include "crypto2/pvss/Aggregation.hpp"
-#include "crypto2/pvss/Beacon.hpp"
-#include "crypto2/pvss/Decryption.hpp"
-#include "crypto2/pvss/Factory.hpp"
-#include "crypto2/pvss/pvss.hpp"
-#include "crypto2/pvss/Utils.hpp"
+#include "crypto/pvss/Aggregation.hpp"
+#include "crypto/pvss/Beacon.hpp"
+#include "crypto/pvss/Decryption.hpp"
+#include "crypto/pvss/Factory.hpp"
+#include "crypto/pvss/Precomputes.hpp"
+#include "crypto/pvss/pvss.hpp"
+#include "crypto/pvss/Utils.hpp"
 
-#include "crypto2/pvss/Serialization.hpp"
+#include "crypto/pvss/Serialization.hpp"
 
 // #define TEST_API
 
@@ -34,6 +35,11 @@ int main() {
     // Create a factory
     auto factory = optrand_crypto::Factory(std::move(conf));
     std::vector<optrand_crypto::Context> setup = factory.getContext();
+
+    // Initialize the precomputations for every context
+    for(auto& context: setup) {
+      context.initialize_precomputations();
+    }
     
     // Create PVSS vectors
     std::vector<optrand_crypto::pvss_sharing_t> pvss_vec;
