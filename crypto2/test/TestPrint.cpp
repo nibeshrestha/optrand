@@ -3,15 +3,15 @@
 #include <stdexcept>
 #include <vector>
 
-#include "crypto/pvss/Aggregation.hpp"
-#include "crypto/pvss/Beacon.hpp"
-#include "crypto/pvss/Decryption.hpp"
-#include "crypto/pvss/Factory.hpp"
-#include "crypto/pvss/Precomputes.hpp"
-#include "crypto/pvss/pvss.hpp"
-#include "crypto/pvss/Utils.hpp"
+#include "crypto2/pvss/Aggregation.hpp"
+#include "crypto2/pvss/Beacon.hpp"
+#include "crypto2/pvss/Decryption.hpp"
+#include "crypto2/pvss/Factory.hpp"
+#include "crypto2/pvss/Precomputes.hpp"
+#include "crypto2/pvss/pvss.hpp"
+#include "crypto2/pvss/Utils.hpp"
 
-#include "crypto/pvss/Serialization.hpp"
+#include "crypto2/pvss/Serialization.hpp"
 
 // #define TEST_API
 
