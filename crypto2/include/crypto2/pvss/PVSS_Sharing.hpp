@@ -6,10 +6,6 @@
 #include "pvss.hpp"
 
 #include "Serialization.hpp"
-#include "salticidae/type.h"
-#include "salticidae/stream.h"
-
-using namespace salticidae;
 
 namespace optrand_crypto {
 
@@ -27,21 +23,6 @@ public:
 
     friend std::ostream& operator<<(std::ostream& os, const optrand_crypto::pvss_sharing_t& dt);
     friend std::istream& operator>>(std::istream& in, optrand_crypto::pvss_sharing_t& dt);
-
-//    void serialize(DataStream &s) const{
-//        s << htole((uint32_t) encryptions.size());
-//        for (auto enc: encryptions)
-//            s << enc;
-//    }
-//
-//    void unserialize(DataStream &s, optrand_crypto::pvss_sharing_t& self) const{
-//        uint32_t n;
-//        s >> n;
-//        n = letoh(n);
-//        self.encryptions.resize(n);
-//        for (auto &enc: self.encryptions)
-//            s >> enc;
-//    }
 
 };
 
