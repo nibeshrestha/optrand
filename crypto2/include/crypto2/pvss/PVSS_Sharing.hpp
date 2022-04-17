@@ -6,10 +6,7 @@
 #include "pvss.hpp"
 
 #include "Serialization.hpp"
-#include "salticidae/type.h"
-#include "salticidae/stream.h"
 
-using namespace salticidae;
 
 namespace optrand_crypto {
 

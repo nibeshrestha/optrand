@@ -12,6 +12,7 @@
 
 using namespace optrand_crypto;
 using namespace std;
+using namespace salticidae;
 
 
 int main(int argc, char **argv) {
