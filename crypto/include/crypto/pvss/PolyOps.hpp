@@ -145,7 +145,9 @@ static G lagrange_interpolation(const size_t degree,
 }
 
 template<class G>
-bool Polynomial::ensure_degree(std::vector<G> evaluations, size_t degree, const Precomputes* precomputes) 
+bool Polynomial::ensure_degree(std::vector<G> evaluations, 
+    size_t degree, 
+    const Precomputes* precomputes) 
 {
     auto use_precomputes = precomputes != nullptr;
     size_t num = evaluations.size();
