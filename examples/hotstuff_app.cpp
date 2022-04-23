@@ -62,6 +62,8 @@ using hotstuff::MsgReqCmd;
 using hotstuff::MsgRespCmd;
 using hotstuff::get_hash;
 using hotstuff::promise_t;
+using hotstuff::MsgStartNewReplica;
+using hotstuff::MsgDisableReplica;
 
 using HotStuff = hotstuff::HotStuffSecp256k1;
 
@@ -93,6 +95,8 @@ class HotStuffApp: public HotStuff {
     salticidae::BoxObj<salticidae::ThreadCall> req_tcall;
 
     void client_request_cmd_handler(MsgReqCmd &&, const conn_t &);
+    void client_start_cmd_handler(MsgStartNewReplica &&, const conn_t &);
+    void client_stop_cmd_handler(MsgDisableReplica &&, const conn_t &);
 
     static command_t parse_cmd(DataStream &s) {
         auto cmd = new CommandDummy();
@@ -132,6 +136,7 @@ class HotStuffApp: public HotStuff {
                 double stat_period,
                 double impeach_timeout,
                 ReplicaID idx,
+                uint32_t nactive_replicas,
                 const bytearray_t &raw_privkey,
                 NetAddr plisten_addr,
                 NetAddr clisten_addr,
@@ -186,6 +191,7 @@ int main(int argc, char **argv) {
     auto opt_delta = Config::OptValDouble::create(1);
     auto opt_pvss_ctx = Config::OptValStr::create();
     auto opt_pvss_dat = Config::OptValStr::create();
+    auto opt_nactive_replicas = Config::OptValInt::create(9);
 
     config.add_opt("block-size", opt_blk_size, Config::SET_VAL);
     config.add_opt("parent-limit", opt_parent_limit, Config::SET_VAL);
@@ -211,6 +217,7 @@ int main(int argc, char **argv) {
     config.add_opt("help", opt_help, Config::SWITCH_ON, 'h', "show this help info");
     config.add_opt("pvss-ctx", opt_pvss_ctx, Config::SET_VAL, 'z', "PVSS ctx");
     config.add_opt("pvss-dat", opt_pvss_dat, Config::SET_VAL, 'D', "PVSS dat");
+    config.add_opt("nactive-replicas", opt_nactive_replicas, Config::SET_VAL, 'N', "PVSS dat");
 
     EventContext ec;
     config.parse(argc, argv);
@@ -297,6 +304,7 @@ int main(int argc, char **argv) {
                         opt_stat_period->get(),
                         opt_imp_timeout->get(),
                         idx,
+                        opt_nactive_replicas->get(),
                         hotstuff::from_hex(opt_privkey->get()),
                         plisten_addr,
                         NetAddr("0.0.0.0", client_port),
@@ -332,6 +340,7 @@ HotStuffApp::HotStuffApp(uint32_t blk_size,
                         double stat_period,
                         double impeach_timeout,
                         ReplicaID idx,
+                        uint32_t nactive_replicas,
                         const bytearray_t &raw_privkey,
                         NetAddr plisten_addr,
                         NetAddr clisten_addr,
@@ -342,7 +351,7 @@ HotStuffApp::HotStuffApp(uint32_t blk_size,
                         size_t nworker,
                         const Net::Config &repnet_config,
                         const ClientNetwork<opcode_t>::Config &clinet_config):
-    HotStuff(blk_size, idx, raw_privkey,
+    HotStuff(blk_size, idx, nactive_replicas, raw_privkey,
             plisten_addr, std::move(pmaker), pvss_ctx, setup_dat_file, ec, nworker, repnet_config),
     stat_period(stat_period),
     impeach_timeout(impeach_timeout),
@@ -367,6 +376,8 @@ HotStuffApp::HotStuffApp(uint32_t blk_size,
 
     /* register the handlers for msg from clients */
     cn.reg_handler(salticidae::generic_bind(&HotStuffApp::client_request_cmd_handler, this, _1, _2));
+    cn.reg_handler(salticidae::generic_bind(&HotStuffApp::client_start_cmd_handler, this, _1, _2));
+    cn.reg_handler(salticidae::generic_bind(&HotStuffApp::client_stop_cmd_handler, this, _1, _2));
     cn.start();
     cn.listen(clisten_addr);
 }
@@ -380,6 +391,15 @@ void HotStuffApp::client_request_cmd_handler(MsgReqCmd &&msg, const conn_t &conn
         resp_queue.enqueue(std::make_pair(fin, addr));
     });
 }
+
+void HotStuffApp::client_start_cmd_handler(MsgStartNewReplica &&msg, const conn_t &conn) {
+    do_start_join();
+}
+
+void HotStuffApp::client_stop_cmd_handler(MsgDisableReplica &&msg, const conn_t &conn) {
+    do_stop_replica();
+}
+
 
 void HotStuffApp::start(const std::vector<std::tuple<NetAddr, bytearray_t, bytearray_t>> &reps,
                         double delta) {

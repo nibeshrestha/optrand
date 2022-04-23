@@ -1,5 +1,5 @@
 #!/bin/bash
-rep=({0..2})
+rep=({0..8})
 if [[ $# -gt 0 ]]; then
     rep=($@)
 fi

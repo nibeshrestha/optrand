@@ -16,6 +16,7 @@ if __name__ == "__main__":
     parser.add_argument('--nodes', type=str, default='nodes.txt')
     parser.add_argument('--block-size', type=int, default=1)
     parser.add_argument('--pace-maker', type=str, default='rr')
+    parser.add_argument('--num-active', type=str, default='3')
     args = parser.parse_args()
 
 
@@ -30,6 +31,7 @@ if __name__ == "__main__":
     keygen_bin = args.keygen
     tls_keygen_bin = args.tls_keygen
     pvss_setup_bin = args.pvss_setup
+    num_active = args.num_active
 
     main_conf = open("{}.conf".format(prefix), 'w')
     nodes = open(args.nodes, 'w')
@@ -51,6 +53,7 @@ if __name__ == "__main__":
         main_conf.write("pace-maker = {}\n".format(args.pace_maker))
     main_conf.write("stat-period = -1\n")
     main_conf.write("nworker = 2\n")
+    main_conf.write("nactive-replicas = {}\n".format(num_active))
     for r in zip(replicas, keys, tls_keys, itertools.count(0)):
         main_conf.write("replica = {}, {}, {}\n".format(r[0], r[1][0], r[2][2]))
         r_conf_name = "{}-sec{}.conf".format(prefix, r[3])

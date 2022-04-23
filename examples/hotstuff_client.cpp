@@ -42,6 +42,8 @@ using hotstuff::HotStuffError;
 using hotstuff::uint256_t;
 using hotstuff::opcode_t;
 using hotstuff::command_t;
+using hotstuff::MsgStartNewReplica;
+using hotstuff::MsgDisableReplica;
 
 EventContext ec;
 TimerEvent req_timer;
@@ -52,6 +54,7 @@ int max_iter_num;
 uint32_t cid;
 uint32_t cnt = 0;
 uint32_t nfaulty;
+uint32_t nactive_replicas;
 double timeout;
 
 struct Request {
@@ -74,12 +77,20 @@ void connect_all() {
         conns.insert(std::make_pair(i, mn.connect_sync(replicas[i])));
 }
 
+void connect_active(){
+    for (size_t i = 0; i < nactive_replicas; i++)
+        conns.insert(std::make_pair(i, mn.connect_sync(replicas[i])));
+}
+
 bool try_send(bool check = true) {
     if ((!check || waiting.size() < max_async_num) && max_iter_num)
     {
         auto cmd = new CommandDummy(cid, cnt++);
         MsgReqCmd msg(*cmd);
-        for (auto &p: conns) mn.send_msg(msg, p.second);
+        for(uint32_t i=0; i<nactive_replicas; i++) {
+            if(i < nactive_replicas)
+                mn.send_msg(msg, conns[i]);
+        }
 #ifndef HOTSTUFF_ENABLE_BENCHMARK
         HOTSTUFF_LOG_INFO("send new cmd %.10s",
                             get_hex(cmd->get_hash()).c_str());
@@ -155,6 +166,9 @@ int main(int argc, char **argv) {
     auto opt_max_async_num = Config::OptValInt::create(10);
     auto opt_cid = Config::OptValInt::create(-1);
     auto opt_timeout = Config::OptValDouble::create(0.010);
+    auto opt_nactive_replicas = Config::OptValInt::create(9);
+    auto opt_start_replica = Config::OptValInt::create(-1);
+    auto opt_stop_replica = Config::OptValInt::create(-1);
 
     auto shutdown = [&](int) { ec.stop(); };
     salticidae::SigEvent ev_sigint(ec, shutdown);
@@ -168,18 +182,24 @@ int main(int argc, char **argv) {
 #endif
     mn.start();
 
-    config.add_opt("idx", opt_idx, Config::SET_VAL);
+    config.add_opt("idx", opt_idx, Config::SET_VAL, 'i');
     config.add_opt("cid", opt_cid, Config::SET_VAL);
     config.add_opt("replica", opt_replicas, Config::APPEND);
     config.add_opt("iter", opt_max_iter_num, Config::SET_VAL);
     config.add_opt("max-async", opt_max_async_num, Config::SET_VAL);
     config.add_opt("timeout", opt_timeout, Config::SET_VAL);
+    config.add_opt("nactive-replicas", opt_nactive_replicas, Config::SET_VAL, 'N', "number of active replicas");
+    config.add_opt("start-replica", opt_start_replica, Config::SET_VAL, 's');
+    config.add_opt("stop-replica", opt_stop_replica, Config::SET_VAL, 'S');
 
     config.parse(argc, argv);
     auto idx = opt_idx->get();
     max_iter_num = opt_max_iter_num->get();
     max_async_num = opt_max_async_num->get();
     timeout = opt_timeout->get();
+    nactive_replicas = opt_nactive_replicas->get();
+    auto to_start_replica = opt_start_replica->get();
+    auto to_stop_replica = opt_stop_replica->get();
 
     std::vector<std::string> raw;
     for (const auto &s: opt_replicas->get())
@@ -202,11 +222,24 @@ int main(int argc, char **argv) {
 
     nfaulty = (replicas.size() - 1) / 2;
     HOTSTUFF_LOG_INFO("nfaulty = %zu", nfaulty);
-    connect_all();
-//    set_req_timer();
-    try_send();
-    ec.dispatch();
+//    connect_all();
 
+//    set_req_timer();
+    if(to_start_replica > 0){
+        auto conn = mn.connect_sync(replicas[to_start_replica]);
+        auto cmd = new CommandDummy(cid, cnt++);
+        MsgStartNewReplica msg(*cmd);
+        mn.send_msg(msg, conn);
+    } else if(to_stop_replica > 0){
+        auto conn = mn.connect_sync(replicas[to_stop_replica]);
+        auto cmd = new CommandDummy(cid, cnt++);
+        MsgDisableReplica msg(*cmd);
+        mn.send_msg(msg, conn);
+    }else {
+        connect_active();
+        try_send();
+    }
+    ec.dispatch();
 #ifdef HOTSTUFF_ENABLE_BENCHMARK
     for (const auto &e: elapsed)
     {

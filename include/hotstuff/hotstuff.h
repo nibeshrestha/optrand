@@ -151,6 +151,42 @@ struct MsgPVSSTranscript {
     void postponed_parse(HotStuffCore *hsc);
 };
 
+struct MsgNewStateReq {
+    static const opcode_t opcode = 0x12;
+    DataStream serialized;
+    NewStateReq newStateReq;
+    MsgNewStateReq(const NewStateReq &);
+    MsgNewStateReq(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgNewStateResp {
+    static const opcode_t opcode = 0x13;
+    DataStream serialized;
+    NewStateResp newStateResp;
+    MsgNewStateResp(const NewStateResp &);
+    MsgNewStateResp(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+struct MsgJoin {
+    static const opcode_t opcode = 0x14;
+    DataStream serialized;
+    Join join;
+    MsgJoin(const Join &);
+    MsgJoin(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
+
+
+struct MsgJoinSuccess {
+    static const opcode_t opcode = 0x15;
+    DataStream serialized;
+    JoinSuccess joinSuccess;
+    MsgJoinSuccess(const JoinSuccess &);
+    MsgJoinSuccess(DataStream &&s): serialized(std::move(s)) {}
+    void postponed_parse(HotStuffCore *hsc);
+};
 
 using promise::promise_t;
 
@@ -217,9 +253,14 @@ class HotStuffBase: public HotStuffCore {
     salticidae::ThreadCall tcall;
     VeriPool vpool;
     std::vector<NetAddr> peers;
+    std::vector<NetAddr> active_peers;
     std::unordered_map<uint32_t, TimerEvent> commit_timers;
     TimerEvent propose_timer;
     TimerEvent viewtrans_timer;
+    TimerEvent view_timer;
+
+    uint32_t nactive_replicas;
+    bool is_disabled;
 
     private:
     /** whether libevent handle is owned by itself */
@@ -286,6 +327,10 @@ class HotStuffBase: public HotStuffCore {
     inline void vote_handler(MsgVote &&, const Net::conn_t &);
     inline void status_handler(MsgStatus &&, const Net::conn_t &);
     inline void pvss_transcript_handler(MsgPVSSTranscript &&, const Net::conn_t &);
+    inline void new_state_req_handler(MsgNewStateReq &&, const Net::conn_t &);
+    inline void new_state_resp_handler(MsgNewStateResp &&, const Net::conn_t &);
+    inline void join_handler(MsgJoin &&, const Net::conn_t &);
+    inline void join_success_handler(MsgJoinSuccess &&msg, const Net::conn_t &conn);
 
     /** fetches full block data */
     inline void req_blk_handler(MsgReqBlock &&, const Net::conn_t &);
@@ -303,7 +348,7 @@ class HotStuffBase: public HotStuffCore {
     template<typename T, typename M>
     void _do_broadcast(const T &t) {
         //M m(t);
-        pn.multicast_msg(M(t), peers);
+        pn.multicast_msg(M(t), active_peers);
         //for (const auto &replica: peers)
         //    pn.send_msg(m, replica);
     }
@@ -340,6 +385,8 @@ class HotStuffBase: public HotStuffCore {
     void stop_propose_timer() override;
     void set_viewtrans_timer(double t_sec) override;
     void stop_viewtrans_timer() override;
+    void set_view_timer(double t_sec) override;
+    void stop_view_timer() override;
 
     void do_decide(Finality &&) override;
     void do_consensus(const block_t &blk) override;
@@ -388,10 +435,32 @@ class HotStuffBase: public HotStuffCore {
         pn.send_msg(MsgPVSSTranscript(pvss_transcript), get_config().get_addr(dest));
     }
 
+    void do_broadcast_new_state_req(const NewStateReq &newStateReq) override {
+        _do_broadcast<NewStateReq, MsgNewStateReq>(newStateReq);
+    }
+
+    void do_send_new_state(const NewStateResp &newStateResp, ReplicaID dest) override{
+        pn.send_msg(MsgNewStateResp(newStateResp), get_config().get_addr(dest));
+    }
+
+    void do_broadcast_join(const Join &join) override{
+        _do_broadcast<Join, MsgJoin>(join);
+     }
+
+     void do_send_join_success(const JoinSuccess &joinSuccess, ReplicaID dest) override {
+        pn.send_msg(MsgJoinSuccess(joinSuccess), get_config().get_addr(dest));
+     }
+
     void do_propose() override;
 
     void schedule_propose(double t_sec) override;
 
+    void delete_peer(const NetAddr &addr) override {
+        active_peers.erase(std::remove(active_peers.begin(), active_peers.end(), addr), active_peers.end());
+    }
+
+    void refresh_active_peers(const std::vector<NetAddr> &_peers) override;
+    void add_active_peer(const NetAddr &addr) override;
 
     protected:
 
@@ -402,6 +471,7 @@ class HotStuffBase: public HotStuffCore {
     public:
     HotStuffBase(uint32_t blk_size,
             ReplicaID rid,
+            uint32_t nactive_replicas,
             privkey_bt &&priv_key,
             NetAddr listen_addr,
             pacemaker_bt pmaker,
@@ -419,6 +489,9 @@ class HotStuffBase: public HotStuffCore {
     void exec_command(uint256_t cmd_hash, commit_cb_t callback);
     void start(std::vector<std::tuple<NetAddr, pubkey_bt, uint256_t>> &&replicas,
                 double delta, bool ec_loop = false);
+
+    void do_start_join();
+    void do_stop_replica();
 
     size_t size() const { return peers.size(); }
     const auto &get_decision_waiting() const { return decision_waiting; }
@@ -480,6 +553,7 @@ class HotStuff: public HotStuffBase {
     public:
     HotStuff(uint32_t blk_size,
             ReplicaID rid,
+            uint32_t nactive_replicas,
             const bytearray_t &raw_privkey,
             NetAddr listen_addr,
             pacemaker_bt pmaker,
@@ -490,6 +564,7 @@ class HotStuff: public HotStuffBase {
             const Net::Config &netconfig = Net::Config()):
         HotStuffBase(blk_size,
                     rid,
+                    nactive_replicas,
                     new PrivKeyType(raw_privkey),
                     listen_addr,
                     std::move(pmaker),

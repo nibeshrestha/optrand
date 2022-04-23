@@ -131,9 +131,45 @@ void MsgEcho2::postponed_parse(HotStuffCore *hsc) {
     serialized >> echo;
 }
 
+const opcode_t MsgNewStateReq::opcode;
+MsgNewStateReq::MsgNewStateReq(const NewStateReq &newStateReq) { serialized << newStateReq; }
+void MsgNewStateReq::postponed_parse(HotStuffCore *hsc) {
+    serialized >> newStateReq;
+}
+
+const opcode_t MsgNewStateResp::opcode;
+MsgNewStateResp::MsgNewStateResp(const NewStateResp &newStateResp) { serialized << newStateResp; }
+void MsgNewStateResp::postponed_parse(HotStuffCore *hsc) {
+    serialized >> newStateResp;
+}
+
+
+const opcode_t MsgJoin::opcode;
+MsgJoin::MsgJoin(const Join &join) { serialized << join; }
+void MsgJoin::postponed_parse(HotStuffCore *hsc) {
+    serialized >> join;
+}
+
+
+const opcode_t MsgJoinSuccess::opcode;
+MsgJoinSuccess::MsgJoinSuccess(const JoinSuccess &joinSuccess) { serialized << joinSuccess; }
+void MsgJoinSuccess::postponed_parse(HotStuffCore *hsc) {
+    serialized >> joinSuccess;
+}
+
+
 // TODO: improve this function
 void HotStuffBase::exec_command(uint256_t cmd_hash, commit_cb_t callback) {
     cmd_pending.enqueue(std::make_pair(cmd_hash, callback));
+}
+
+void HotStuffBase::do_start_join(){
+    on_start_join();
+}
+
+void HotStuffBase::do_stop_replica(){
+    is_disabled = true;
+    LOG_WARN("Replica disabled");
 }
 
 void HotStuffBase::on_fetch_blk(const block_t &blk) {
@@ -428,6 +464,41 @@ void HotStuffBase::pvss_transcript_handler(MsgPVSSTranscript &&msg, const Net::c
 
 }
 
+void HotStuffBase::new_state_req_handler(MsgNewStateReq &&msg, const Net::conn_t &conn){
+    const NetAddr &peer = conn->get_peer_addr();
+    if(peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<NewStateReq> n(new NewStateReq(std::move(msg.newStateReq)));
+    on_receive_new_state_req(*n);
+}
+
+void HotStuffBase::new_state_resp_handler(MsgNewStateResp &&msg, const Net::conn_t &conn){
+    const NetAddr &peer = conn->get_peer_addr();
+    if(peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<NewStateResp> n(new NewStateResp(std::move(msg.newStateResp)));
+    on_receive_new_state_resp(*n);
+}
+
+void HotStuffBase::join_handler(MsgJoin &&msg, const Net::conn_t &conn){
+    const NetAddr &peer = conn->get_peer_addr();
+    if(peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<Join> n(new Join(std::move(msg.join)));
+    on_receive_join(*n);
+}
+
+
+void HotStuffBase::join_success_handler(MsgJoinSuccess &&msg, const Net::conn_t &conn){
+    const NetAddr &peer = conn->get_peer_addr();
+    if(peer.is_null()) return;
+    msg.postponed_parse(this);
+    RcObj<JoinSuccess> n(new JoinSuccess(std::move(msg.joinSuccess)));
+    on_receive_join_success(*n);
+}
+
+
+
 void HotStuffBase::set_commit_timer(const block_t &blk, double t_sec) {
 #ifdef SYNCHS_NOTIMER
     on_commit_timeout(blk);
@@ -584,6 +655,7 @@ void HotStuffBase::print_stat() const {
 
 HotStuffBase::HotStuffBase(uint32_t blk_size,
                     ReplicaID rid,
+                    uint32_t nactive_replicas,
                     privkey_bt &&priv_key,
                     NetAddr listen_addr,
                     pacemaker_bt pmaker,
@@ -600,7 +672,8 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
         vpool(ec, nworker),
         pn(ec, netconfig),
         pmaker(std::move(pmaker)),
-
+        nactive_replicas(nactive_replicas),
+        is_disabled(false),
         fetched(0), delivered(0),
         nsent(0), nrecv(0),
         part_parent_size(0),
@@ -631,6 +704,10 @@ HotStuffBase::HotStuffBase(uint32_t blk_size,
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::echo2_handler, this, _1, _2));
     pn.reg_handler(salticidae::generic_bind(&HotStuffBase::pvss_transcript_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::new_state_req_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::new_state_resp_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::join_handler, this, _1, _2));
+    pn.reg_handler(salticidae::generic_bind(&HotStuffBase::join_success_handler, this, _1, _2));
     pn.start();
     pn.listen(listen_addr);
 
@@ -674,17 +751,25 @@ void HotStuffBase::start(
     for (size_t i = 0; i < replicas.size(); i++)
     {
         auto &addr = std::get<0>(replicas[i]);
-        HotStuffCore::add_replica(i, addr, std::move(std::get<1>(replicas[i])));
+
+        if(i < nactive_replicas)
+            HotStuffCore::add_replica(i, addr, std::move(std::get<1>(replicas[i])));
+        else
+            HotStuffCore::add_passive_replica(i, addr, std::move(std::get<1>(replicas[i])));
+
         valid_tls_certs.insert(std::move(std::get<2>(replicas[i])));
         if (addr != listen_addr)
         {
             peers.push_back(addr);
             pn.add_peer(addr);
+
+            if(i < nactive_replicas)
+                active_peers.push_back(addr);
         }
     }
 
     /* ((n - 1) + 1 - 1) / 2 */
-    uint32_t nfaulty = peers.size() / 2;
+    uint32_t nfaulty = nactive_replicas / 2;
     if (nfaulty == 0)
         LOG_WARN("too few replicas in the system to tolerate any failure");
 
@@ -765,9 +850,29 @@ void HotStuffBase::do_propose(){
     ReplicaID proposer = pmaker->get_proposer();
     if(proposer != id || get_last_proposed_view() >= get_view()) return;
     stop_propose_timer();
-
-    on_propose(std::vector<uint256_t >{}, pmaker->get_parents());
+    if (!is_disabled)
+        on_propose(std::vector<uint256_t >{}, pmaker->get_parents());
 }
 
+void HotStuffBase::set_view_timer(double t_sec) {
+    view_timer = TimerEvent(ec, [this](TimerEvent &) {
+//        view_timer.clear();
+        on_view_timer_timeout();
+    });
+    view_timer.add(t_sec);
+}
+
+void HotStuffBase::stop_view_timer() {
+    view_timer.clear();
+}
+
+void HotStuffBase::refresh_active_peers(const std::vector<NetAddr> &_peers){
+    active_peers.clear();
+    active_peers = _peers;
+}
+
+void HotStuffBase::add_active_peer(const NetAddr &addr){
+    active_peers.push_back(addr);
+}
 
 }

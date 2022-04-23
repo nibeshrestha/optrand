@@ -66,18 +66,36 @@ class ReplicaConfig {
     std::unordered_map<ReplicaID, ReplicaInfo> replica_map;
 
     public:
+    std::vector<ReplicaID> active_ids;
     size_t nreplicas;
+    size_t nactive_replicas;
     size_t nmajority;
     size_t nresponsive;
     size_t nreconthres;
 
     double delta;
 
-    ReplicaConfig(): nreplicas(0), nmajority(0), nresponsive(0), nreconthres(0), delta(0) {}
+    ReplicaConfig(): nreplicas(0), nactive_replicas(0), nmajority(0), nresponsive(0), nreconthres(0), delta(0) {}
 
     void add_replica(ReplicaID rid, const ReplicaInfo &info) {
         replica_map.insert(std::make_pair(rid, info));
+        active_ids.push_back(rid);
         nreplicas++;
+        nactive_replicas++;
+    }
+    // Used to add new replica during program execution; for reconfiguration
+    void add_passive_replica(ReplicaID rid, const ReplicaInfo &info){
+        replica_map.insert(std::make_pair(rid, info));
+    }
+
+    void activate_replica(ReplicaID rid){
+        active_ids.push_back(rid);
+        nactive_replicas++;
+    }
+
+    void remove_replica(ReplicaID rid){
+        active_ids.erase(std::remove(active_ids.begin(), active_ids.end(), rid), active_ids.end());
+        nactive_replicas--;
     }
 
     const ReplicaInfo &get_info(ReplicaID rid) const {
@@ -94,6 +112,15 @@ class ReplicaConfig {
 
     const salticidae::NetAddr &get_addr(ReplicaID rid) const {
         return get_info(rid).addr;
+    }
+
+    ReplicaID get_replica_id(uint32_t idx){
+        return active_ids.at(idx);
+    }
+
+    void set_active_ids(std::vector<ReplicaID> &_active_ids){
+        active_ids = _active_ids;
+        nactive_replicas = active_ids.size();
     }
 };
 
@@ -134,6 +161,10 @@ class Block {
     uint256_t qc_ref_hash;
     bytearray_t extra;
 
+    bool contains_join_request;
+    ReplicaID joinReplicaID;
+    bytearray_t jreq_agg;
+
     /* the following fields can be derived from above */
     uint256_t hash;
     std::vector<block_t> parents;
@@ -149,19 +180,23 @@ class Block {
     uint32_t view;
     optrand_crypto::pvss_aggregate_t pvss_agg;
 
+    uint256_t _get_hash();
+
     public:
     Block():
         qc(nullptr),
+        hash(_get_hash()),
         qc_ref(nullptr),
         self_qc(nullptr), height(0),
-        delivered(false), decision(0) {}
+        delivered(false), decision(0), view(0) {}
 
     Block(bool delivered, int8_t decision):
         qc(nullptr),
-        hash(salticidae::get_hash(*this)),
+        hash(_get_hash()),
         qc_ref(nullptr),
-        self_qc(nullptr), height(0),
-        delivered(delivered), decision(decision) {}
+        self_qc(nullptr), height(0), view(0),
+        delivered(delivered), decision(decision),
+        contains_join_request(false) {}
 
     Block(const std::vector<block_t> &parents,
         const std::vector<uint256_t> &cmds,
@@ -176,13 +211,14 @@ class Block {
             qc(std::move(qc)),
             qc_ref_hash(qc_ref ? qc_ref->get_hash() : uint256_t()),
             extra(std::move(extra)),
-            hash(salticidae::get_hash(*this)),
+            hash(_get_hash()),
             parents(parents),
             qc_ref(qc_ref),
             self_qc(std::move(self_qc)),
             height(height),
             delivered(0),
-            decision(decision) {}
+            decision(decision),
+            contains_join_request(false){}
 
     void serialize(DataStream &s) const;
 
@@ -227,6 +263,24 @@ class Block {
           << "parent=" << get_hex10(parent_hashes[0]) << " "
           << "qc_ref=" << (qc_ref ? get_hex10(qc_ref->get_hash()) : "null") << ">";
         return std::move(s);
+    }
+
+    void set_join_request(bool _contains_join_req, ReplicaID jreplicaID, bytearray_t &&_jreq_agg){
+        contains_join_request = _contains_join_req;
+        joinReplicaID = jreplicaID;
+        jreq_agg = std::move(_jreq_agg);
+    }
+
+    bool has_join_request(){
+        return contains_join_request;
+    }
+
+    ReplicaID get_join_replicaID(){
+        return joinReplicaID;
+    }
+
+    const bytearray_t &get_jreq_agg(){
+        return jreq_agg;
     }
 };
 

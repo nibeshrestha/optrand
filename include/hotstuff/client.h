@@ -50,6 +50,22 @@ struct MsgRespCmd {
     }
 };
 
+struct MsgStartNewReplica {
+    static const opcode_t opcode = 0x6;
+    DataStream serialized;
+    command_t cmd;
+    MsgStartNewReplica(const Command &cmd) { serialized << cmd; }
+    MsgStartNewReplica(DataStream &&s): serialized(std::move(s)) {}
+};
+
+struct MsgDisableReplica {
+    static const opcode_t opcode = 0x7;
+    DataStream serialized;
+    command_t cmd;
+    MsgDisableReplica(const Command &cmd) { serialized << cmd; }
+    MsgDisableReplica(DataStream &&s): serialized(std::move(s)) {}
+};
+
 #ifdef SYNCHS_AUTOCLI
 struct MsgDemandCmd {
     static const opcode_t opcode = 0x6;

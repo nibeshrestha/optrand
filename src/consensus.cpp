@@ -134,6 +134,7 @@ void HotStuffCore::check_commit(const block_t &blk) {
         const block_t &blk = *it;
         blk->decision = 1;
         do_consensus(blk);
+        _on_commit(blk);
         LOG_PROTO("commit %s", std::string(*blk).c_str());
 //        for (size_t i = 0; i < blk->cmds.size(); i++)
 //            do_decide(Finality(id, 1, i, blk->height,
@@ -188,7 +189,32 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
             nullptr
         ));
 
-    bnew-> view = view;
+    uint32_t last_join_proposed_view = 0;
+    if(!proposed_join_views.empty())
+        last_join_proposed_view = proposed_join_views.back();
+
+    while (!join_requests.empty()) {
+        auto jreq = join_requests.front();
+        if (jreq_proposed[jreq]) {
+            join_requests.pop();
+        } else {
+            if(last_join_proposed_view <= view - config.nmajority) {
+                jreq_proposed[jreq] = true;
+                auto agg = join_agg_transcripts[jreq];
+                std::stringstream ss;
+                ss.str(std::string{});
+                ss << agg;
+
+                auto str = ss.str();
+                bytearray_t bt(str.begin(), str.end());
+                bnew->set_join_request(true, jreq, std::move(bt));
+//                proposed_join_views.push_back(view);
+                break;
+            }
+        }
+    }
+
+    bnew->view = view;
 
     const uint256_t bnew_hash = bnew->get_hash();
     bnew->self_qc = create_quorum_cert(bnew_hash, view);
@@ -196,10 +222,13 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     Proposal prop(id, bnew, view, nullptr);
     LOG_PROTO("propose %s", std::string(*bnew).c_str());
     /* self-vote */
-    if (bnew->height <= vheight)
+    if (bnew->height <= vheight) {
+        LOG_WARN("new block height : %d old blk height :%d", bnew->height, vheight);
         throw std::runtime_error("new block should be higher than vheight");
+    }
     vheight = bnew->height;
     finished_propose[bnew] = true;
+    view_blocks[view] = bnew;
     _vote(bnew, id);
     on_propose_(prop);
 
@@ -208,6 +237,7 @@ block_t HotStuffCore::on_propose(const std::vector<uint256_t> &cmds,
     /* broadcast to other replicas */
     do_broadcast_proposal(prop);
     on_receive_view_proposal_(view);
+
     return bnew;
 }
 
@@ -264,14 +294,20 @@ void HotStuffCore::on_receive_proposal(const Proposal &prop) {
     ss >> agg;
 
     if(!pvss_context.verify_aggregation(agg)) {
-        LOG_WARN("PVSS verification failed on_receive_proposal View: %d", view);
-        return;
+        throw std::runtime_error("PVSS verification failed on_receive_proposal");
     }
 
     bnew->view = view;
     view_agg_transcripts[view] = agg;
 
     finished_propose[bnew] = true;
+    view_blocks[view] = bnew;
+
+    if(bnew->contains_join_request){
+        auto jreq = bnew->get_join_replicaID();
+        jreq_proposed[jreq] = true;
+    }
+
 
     on_receive_proposal_(prop);
     on_receive_view_proposal_(view);
@@ -327,7 +363,6 @@ void HotStuffCore::on_receive_status(const Status &status) {
     if (qsize >= config.nmajority) return;
 
     block_t blk = get_delivered_blk(status.qc->get_obj_hash());
-
     auto &blk_qc = blk->self_qc;
     blk_qc = status.qc->clone();
     update_hqc(blk, blk_qc);
@@ -338,9 +373,33 @@ void HotStuffCore::on_receive_status(const Status &status) {
         return;
     }
 
-    bool is_hqc = get_hqc_qc()->get_view() + 1 == view;
+    std::string str(status.pvss_transcript.begin(), status.pvss_transcript.end());
+    std::stringstream ss;
+    ss.str(str);
 
-    if (qsize + 1 == config.nmajority && is_hqc) do_propose();
+    optrand_crypto::pvss_sharing_t pvss_recv;
+
+    ss >> pvss_recv;
+
+    if(!pvss_context.verify_sharing(pvss_recv)){
+        throw std::runtime_error("PVSS Verification failed in status");
+    }
+
+    view_transcripts[status.view].push_back(pvss_recv);
+    transcript_ids[status.view].push_back((size_t) status.replicaID);
+
+    if (qsize + 1 == config.nmajority) {
+        auto agg = pvss_context.aggregate(view_transcripts[status.view], transcript_ids[status.view]);
+        if(!pvss_context.verify_aggregation(agg)){
+            throw std::runtime_error("Aggregation Verification failed in status");
+        }
+        view_agg_transcripts[status.view] = agg;
+
+        bool is_hqc = get_hqc_qc()->get_view() + 1 == view;
+        if(is_hqc)
+            do_propose();
+    }
+
 }
 
 
@@ -440,6 +499,7 @@ void HotStuffCore::_broadcast_share(const uint32_t _view){
     auto str = ss.str();
     bytearray_t dec_bytes(str.begin(), str.end());
 
+
 //    DataStream p;
 //    p << view;
 
@@ -455,6 +515,8 @@ void HotStuffCore::on_receive_share(const Share &share){
     LOG_PROTO("got %s", std::string(share).c_str());
     LOG_PROTO("now state: %s", std::string(*this).c_str());
     if(share.view < view) return;
+    if(share.view <= joined_view + config.nactive_replicas) return;
+
     size_t qsize = view_shares[share.view].size();
 
     if (qsize >= config.nmajority) return;
@@ -501,12 +563,15 @@ void HotStuffCore::on_receive_share(const Share &share){
 }
 
 void HotStuffCore::_try_enter_view() {
-    if(last_view_cert_received == view && (last_view_shares_received == view || last_view_beacon_received == view)) {
-        _update_agg_queue(view);
-        view += 1;
-        enter_view(view);
-        on_enter_view(view);
-    }
+    if(last_view_cert_received == view && (last_view_shares_received == view || last_view_beacon_received == view))
+        _enter_view();
+}
+
+void HotStuffCore::_enter_view() {
+    _update_agg_queue(view);
+    view += 1;
+    enter_view(view);
+    on_enter_view(view);
 }
 
 void HotStuffCore::_deliver_proposal(const Proposal &prop) {
@@ -715,6 +780,7 @@ void HotStuffCore::on_propose_timeout() {
     if (qsize < config.nmajority){
         LOG_WARN("Insufficient status messages; Timing error");
     }
+    LOG_WARN("Proposing from propose timeout.");
 
     do_propose();
 }
@@ -756,6 +822,7 @@ void HotStuffCore::on_init(uint32_t nfaulty, double delta) {
     last_cert_delivered_view = 0;
     last_proposed_view = 0;
     last_view_beacon_received = 0;
+    joined_view = 0;
 
 }
 
@@ -787,6 +854,10 @@ void HotStuffCore::add_replica(ReplicaID rid, const NetAddr &addr,
     config.add_replica(rid, 
             ReplicaInfo(rid, addr, std::move(pub_key)));
     b0->voted.insert(rid);
+}
+
+void HotStuffCore::add_passive_replica(ReplicaID rid, const NetAddr &addr, pubkey_bt &&pub_key){
+    config.add_passive_replica(rid, ReplicaInfo(rid, addr, std::move(pub_key)));
 }
 
 promise_t HotStuffCore::async_qc_finish(const block_t &blk) {
@@ -899,35 +970,178 @@ void HotStuffCore::on_view_change() {
 void HotStuffCore::on_enter_view(const uint32_t _view) {
     view_waiting[_view].resolve();
 
-    Status status(id, hqc.second->clone(), view, this);
-    do_status(status);
-
-    auto nreplicas = config.nreplicas;
-    auto dest = (id + _view) % nreplicas;
-    int mul = (_view - 1) / nreplicas;
-    auto for_view =  (2 + mul ) * nreplicas + dest + 1;
-
     // PVSS sharing
     auto sharing = pvss_context.create_sharing();
-    if (dest == id) {
-        view_transcripts[for_view].push_back(sharing);
-        transcript_ids[for_view].push_back(id);
-    }else {
-        std::stringstream ss;
-        ss.str(std::string{});
-        ss << sharing;
-        auto str = ss.str();
-        bytearray_t transcript(str.begin(), str.end());
 
-        PVSSTranscript ptrans(id, for_view, std::move(transcript));
-        do_send_pvss_transcript(ptrans, dest);
-    }
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << sharing;
+    auto str = ss.str();
+    bytearray_t transcript(str.begin(), str.end());
+
+    Status status(id, hqc.second->clone(), view, std::move(transcript), this);
+    do_status(status);
+
     schedule_propose(2*config.delta);
+
+    if(view > config.nmajority )
+        _check_if_committed(view - config.nmajority);
+
+    stop_view_timer();
+    set_view_timer(11*config.delta);
+
+    if(committed_join_requests.find(_view) !=committed_join_requests.end()){
+        auto _blk = committed_join_requests[_view];
+        auto join_replicaID = _blk->get_join_replicaID();
+        auto jreq_agg = _blk->get_jreq_agg();
+
+        config.activate_replica(join_replicaID);
+        add_active_peer(config.get_addr(join_replicaID));
+        // Todo: Send beacon along with other required information
+
+        JoinSuccess joinSuccess(id, _view);
+        do_send_join_success(joinSuccess, join_replicaID);
+    }
+
+}
+
+void HotStuffCore::_check_if_committed(uint32_t _view){
+    if(_view  <= joined_view) return;
+    auto proposer = get_proposer(_view);
+    if(view_blocks.find(_view) == view_blocks.end()){
+        LOG_WARN("Block proposed by replica %d not committed by view %d joined_view %d", proposer, _view, joined_view);
+        config.remove_replica(proposer);
+
+        auto addr = config.get_addr(proposer);
+        delete_peer(addr);
+    }
+}
+
+void HotStuffCore::_on_commit(const block_t &blk){
+    auto blk_view = blk->view;
+    if(blk_view < joined_view) return;
+    if(blk->has_join_request()){
+        auto _view = blk_view + config.nmajority;
+        committed_join_requests[_view] = blk;
+        const auto &blk_hash = blk->get_hash();
+        LOG_WARN("BLK has join request....blk = %s curview %d blk_view %d", get_hex10(blk_hash).c_str(), view, blk->view);
+    }
+}
+
+
+void HotStuffCore::on_view_timer_timeout(){
+    _enter_view();
 }
 
 void HotStuffCore::on_receive_qc_(const uint32_t _view){
     view_qc_waiting[_view].resolve();
 }
+
+void HotStuffCore::on_start_join(){
+    LOG_WARN("Starting to join");
+    NewStateReq newStateReq(id);
+    do_broadcast_new_state_req(newStateReq);
+}
+
+void HotStuffCore::on_receive_new_state_req(const NewStateReq &newStateReq){
+    LOG_PROTO("got %s", std::string(newStateReq).c_str());
+
+    //Todo: Create PVSS sharing for active_ids including the new replica;
+    auto sharing = pvss_context.create_sharing();
+
+    std::stringstream ss;
+    ss.str(std::string{});
+    ss << sharing;
+    auto str = ss.str();
+    bytearray_t transcript(str.begin(), str.end());
+
+    NewStateResp newStateResp(id, view, config.active_ids, std::move(transcript));
+    do_send_new_state(newStateResp, newStateReq.replicaID);
+}
+
+void HotStuffCore::on_receive_new_state_resp(const NewStateResp &newStateResp){
+    LOG_PROTO("got %s", std::string(newStateResp).c_str());
+
+    auto qsize = state_resp_ids.size();
+    if (qsize >= config.nmajority) return;
+
+    std::string str(newStateResp.pvss_transcript.begin(), newStateResp.pvss_transcript.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_sharing_t pvss_recv;
+
+    ss >> pvss_recv;
+
+    if(!pvss_context.verify_sharing(pvss_recv)){
+        return;
+    }
+
+    state_resp_transcripts.push_back(pvss_recv);
+    state_resp_ids.push_back((size_t)newStateResp.replicaID);
+
+    if (qsize + 1 == config.nmajority){
+        auto active_ids = newStateResp.active_replicas;
+
+        std::vector<NetAddr> active_peers;
+        for(auto _id: active_ids){
+            auto info = config.get_info(_id);
+            active_peers.push_back(info.addr);
+        }
+
+        config.set_active_ids(active_ids);
+        refresh_active_peers(active_peers);
+
+        auto agg = pvss_context.aggregate(state_resp_transcripts, state_resp_ids);
+
+        std::stringstream ss;
+        ss.str(std::string{});
+        ss << agg;
+
+        auto str = ss.str();
+        bytearray_t agg_bytes(str.begin(), str.end());
+
+        Join join(id, std::move(agg_bytes));
+        do_broadcast_join(join);
+    }
+}
+
+void HotStuffCore::on_receive_join(const Join &join){
+    LOG_PROTO("got %s", std::string(join).c_str());
+
+    std::string str(join.agg_transcript.begin(), join.agg_transcript.end());
+    std::stringstream ss;
+    ss.str(str);
+
+    optrand_crypto::pvss_aggregate_t agg;
+    ss >> agg;
+
+    if(!pvss_context.verify_aggregation(agg)){
+        throw std::runtime_error("Aggregation verification failed in join request");
+    }
+
+    join_requests.push(join.replicaID);
+    // Assume the joining replica is honest and its aggregation is valid.
+    join_agg_transcripts[join.replicaID] = agg;
+}
+
+
+void HotStuffCore::on_receive_join_success(const hotstuff::JoinSuccess &js) {
+    LOG_PROTO("got %s", std::string(js).c_str());
+
+    if(join_processed)
+        return;
+
+    join_processed = true;
+    joined_view = js.view;
+    config.activate_replica(id);
+    view = js.view;
+    enter_view(js.view);
+    on_enter_view(js.view);
+
+}
+
+
 
 HotStuffCore::operator std::string () const {
     DataStream s;
