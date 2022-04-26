@@ -4,6 +4,7 @@
 #include <optional>
 
 #include <libff/common/serialization.hpp>
+#include <unordered_map>
 //using libff::operator<<;
 //using libff::operator>>;
 
@@ -106,6 +107,15 @@ namespace optrand_crypto {
         }
     }
 
+    template<typename T>
+    void serializeMap(std::ostream& out, const std::unordered_map<size_t, T>& v) {
+        out << v.size() << std::endl;
+        for(const auto& [i,e] : v) {
+            out << i << std::endl;
+            out << e << std::endl;
+        }
+    }
+
     // template<class T>
     // std::ostream& operator<<(std::ostream& os, const std::vector<T>& dt) {
     //     serializeVector(os, dt);
@@ -122,6 +132,26 @@ namespace optrand_crypto {
         for(size_t i = 0; i < len; i++) {
             in >> v[i];
             libff::consume_OUTPUT_NEWLINE(in);
+        }
+    }
+
+    template<class T>
+    void deserializeMap(std::istream& in, std::unordered_map<size_t, T>& v) {
+        size_t len;
+        in >> len;
+        libff::consume_OUTPUT_NEWLINE(in);
+    
+        v.reserve(len);
+        for(size_t i = 0; i < len; i++) {
+            size_t key;
+            in >> key;
+            libff::consume_OUTPUT_NEWLINE(in);
+
+            T val;
+            in >> val;
+            libff::consume_OUTPUT_NEWLINE(in);
+
+            v.emplace(key, val);
         }
     }
 

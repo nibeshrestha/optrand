@@ -8,10 +8,10 @@
 namespace optrand_crypto {
 
 struct Precomputes {
-    size_t n,f;
+    size_t n;
     std::unordered_map<size_t, std::unordered_map<size_t,Fr>> inverse_map;
 
-    Precomputes(size_t n, size_t f):n{n}, f{f} {
+    Precomputes(size_t n):n{n} {
         inverse_map.reserve(n);
         for(size_t i=1; i<=n; i++) {
             Fr scalar_i = static_cast<long>(i);

@@ -60,60 +60,27 @@ struct Polynomial {
 
     Fr get_secret() const { return coeffs.at(0); }
 
+    // DONE: Fix to use provided points
     template<class G>
-    static bool ensure_degree(std::vector<G> group, size_t degree, 
-                                const Precomputes* precomputes = nullptr);
-
-    template<class G>
-    static G lagrange_interpolation(const size_t degree, 
-                                        const std::vector<G>& evals, 
-                                        const Precomputes* precomputes = nullptr);
+    static bool ensure_degree(
+            std::vector<G> group, 
+            std::vector<size_t> indices,  
+            size_t degree, 
+            const Precomputes* precomputes = nullptr
+    );
 
     template<class G>
     static G lagrange_interpolation(const size_t degree,    
                                         const std::vector<G>& evals, 
-                                        const std::vector<G>& points,
+                                        const std::vector<size_t>& points,
                                         const Precomputes* precomputes = nullptr);
 
 };
 
 template<class G>
-inline G Polynomial::lagrange_interpolation(const size_t degree, 
-                                            const std::vector<G>& evaluations,
-                                            const Precomputes* precomputes) 
-{
-    if (evaluations.size() < degree+1) {
-        throw std::runtime_error("insufficient evaluations");
-    }
-    bool use_precomputes = precomputes != nullptr;
-    std::vector<Fr> interpolants;
-    interpolants.reserve(degree+1);
-    for(size_t j=0; j<=degree;j++) {
-        Fr xj = static_cast<long>(j+1);
-        Fr prod = Fr::one();
-        for(size_t m=0; m<=degree;m++) {
-            if(m==j) {
-                continue;
-            }
-            Fr xm = static_cast<long>(m+1);
-            if(use_precomputes) {
-                prod = (xm* precomputes->inverse_map.at(m+1).at(j+1)) * prod;
-            } else {
-                prod = (xm* ((xm-xj).inverse())) * prod;
-            }
-        }
-        interpolants.push_back(prod);
-    }
-    return multiExp<G>(evaluations.begin(), 
-                        evaluations.begin()+static_cast<long>(degree+1), 
-                        interpolants.begin(), 
-                        interpolants.end());
-}
-
-template<class G>
-static G lagrange_interpolation(const size_t degree, 
+G Polynomial::lagrange_interpolation(const size_t degree, 
                                     const std::vector<G>& evals, 
-                                    const std::vector<Fr>& points,
+                                    const std::vector<size_t>& points,
                                     const Precomputes* precomputes)
 {
     if (evals.size() < degree+1) {
@@ -123,15 +90,15 @@ static G lagrange_interpolation(const size_t degree,
     std::vector<Fr> interpolants;
     interpolants.reserve(degree+1);
     for(size_t j=0; j<=degree;j++) {
-        Fr xj = points.at(j);
+        Fr xj = static_cast<long>(points.at(j));
         Fr prod = Fr::one();
         for(size_t m=0; m<=degree;m++) {
             if(m==j) {
                 continue;
             }
-            Fr xm = points.at(m);
+            Fr xm = static_cast<long>(points.at(m));
             if(use_precomputes) {
-                prod = (xm* precomputes->inverse_map.at(m+1).at(j+1)) * prod;
+                prod = (xm* precomputes->inverse_map.at(points.at(m)).at(points.at(j))) * prod;
             } else {
                 prod = (xm* ((xm-xj).inverse())) * prod;
             }
@@ -146,6 +113,7 @@ static G lagrange_interpolation(const size_t degree,
 
 template<class G>
 bool Polynomial::ensure_degree(std::vector<G> evaluations, 
+    std::vector<size_t> indices,
     size_t degree, 
     const Precomputes* precomputes) 
 {
@@ -154,20 +122,25 @@ bool Polynomial::ensure_degree(std::vector<G> evaluations,
     if (num < degree)
         return false;
 
+    // I am going to assume the following:
+    assert(evaluations.size() == indices.size());
+
     Polynomial poly = Polynomial::Random(num-degree-2);
     G val = G::zero();
 
     std::vector<Fr> cperps;
     cperps.reserve(num);
-    for(size_t i=1; i<=num; i++) {
-        Fr scalar_i = static_cast<long>(i);
+    for(size_t i=0; i<num; i++) {
+        size_t idx = indices.at(i)+1;
+        Fr scalar_i = static_cast<long>(idx);
         Fr cperp = poly.evaluate(scalar_i);
-        for(size_t j=1;j<=num;j++) {
-            if(i != j) {
+        for(size_t j=0;j<num;j++) {
+            size_t jdx = indices.at(j)+1;
+            if(idx != jdx) {
                 if (use_precomputes) {
-                    cperp = cperp * precomputes->inverse_map.at(i).at(j);
+                    cperp = cperp * precomputes->inverse_map.at(idx).at(jdx);
                 } else {
-                    Fr scalar_j = static_cast<long>(j);
+                    Fr scalar_j = static_cast<long>(jdx);
                     cperp = cperp * ((scalar_i-scalar_j).inverse());
                 }
             }

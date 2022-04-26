@@ -52,6 +52,7 @@ function install_deps () {
         sudo apt-get install -y \
             cmake \
             g++ \
+            clang \
             libssl-dev \
             doxygen \
             pkg-config \
@@ -60,7 +61,10 @@ function install_deps () {
             libtool \
             git \
             autoconf automake libtool \
-            libboost-all-dev libgmp3-dev libprocps-dev libsodium-dev \
+            libboost-all-dev \
+            libgmp3-dev \
+            libprocps-dev \
+            libsodium-dev \
             || exit 1
 }
 

@@ -17,7 +17,11 @@ public:
     std::vector<Com_Group> commitments;
 
     std::vector<DecompositionProof> decomposition;
-    std::vector<size_t> id_vec;
+    std::vector<size_t> participant_ids;
+    std::vector<size_t> sender_ids;
+
+    // A map to find the enc/comm for replica i
+    std::unordered_map<size_t, size_t> id_to_idx_map;
 
     #ifndef NDEBUG
     Fr secret;
@@ -32,7 +36,8 @@ inline std::ostream& operator<< (std::ostream& os, const optrand_crypto::pvss_ag
     os << self.encryptions << std::endl;
     os << self.commitments << std::endl;
     serializeVector(os, self.decomposition);
-    serializeVector(os, self.id_vec);
+    serializeVector(os, self.participant_ids);
+    serializeVector(os, self.sender_ids);
     #ifndef NDEBUG
     os << self.secret << std::endl;
     #endif
@@ -47,7 +52,8 @@ inline std::istream& operator>> (std::istream& in, optrand_crypto::pvss_aggregat
     libff::consume_OUTPUT_NEWLINE(in);
 
     deserializeVector(in, self.decomposition);
-    deserializeVector(in, self.id_vec);
+    deserializeVector(in, self.participant_ids);
+    deserializeVector(in, self.sender_ids);
 
     #ifndef NDEBUG
     in >> self.secret;
