@@ -38,6 +38,8 @@ inline std::ostream& operator<< (std::ostream& os, const optrand_crypto::pvss_ag
     serializeVector(os, self.decomposition);
     serializeVector(os, self.participant_ids);
     serializeVector(os, self.sender_ids);
+    serializeMap(os, self.id_to_idx_map);
+
     #ifndef NDEBUG
     os << self.secret << std::endl;
     #endif
@@ -54,6 +56,7 @@ inline std::istream& operator>> (std::istream& in, optrand_crypto::pvss_aggregat
     deserializeVector(in, self.decomposition);
     deserializeVector(in, self.participant_ids);
     deserializeVector(in, self.sender_ids);
+    deserializeMap(in, self.id_to_idx_map);
 
     #ifndef NDEBUG
     in >> self.secret;
