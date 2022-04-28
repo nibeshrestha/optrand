@@ -286,7 +286,7 @@ int main(int argc, char **argv) {
     optrand_crypto::initialize();
 
     // Create a system config
-    auto conf = optrand_crypto::SyncSystemConfig::FromNumReplicas(replicas.size());
+    auto conf = optrand_crypto::SyncSystemConfig::FromNumReplicas(opt_nactive_replicas->get());
     auto factory = optrand_crypto::Factory(std::move(conf));
 
     std::ifstream ctx_stream;

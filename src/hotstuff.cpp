@@ -125,10 +125,10 @@ void MsgEcho::postponed_parse(HotStuffCore *hsc) {
 }
 
 const opcode_t MsgEcho2::opcode;
-MsgEcho2::MsgEcho2(const Echo &echo) { serialized << echo; }
+MsgEcho2::MsgEcho2(const Echo2 &echo2) { serialized << echo2; }
 void MsgEcho2::postponed_parse(HotStuffCore *hsc) {
-    echo.hsc = hsc;
-    serialized >> echo;
+    echo2.hsc = hsc;
+    serialized >> echo2;
 }
 
 const opcode_t MsgNewStateReq::opcode;
@@ -401,11 +401,12 @@ void HotStuffBase::echo_handler(MsgEcho &&msg, const Net::conn_t &conn) {
     msg.postponed_parse(this);
     RcObj<Echo> e(new Echo(std::move(msg.echo)));
     promise::all(std::vector<promise_t>{
+            async_deliver_blk(e->blk_hash, peer),
             async_wait_enter_view(e->view),
             e->verify(vpool),
     }).then([this, e, peer](const promise::values_t values) {
-        if (!promise::any_cast<bool>(values[1]))
-            LOG_WARN("invalid status message from %s", std::string(peer).c_str());
+        if (!promise::any_cast<bool>(values[2]))
+            LOG_WARN("invalid echo message from %s", std::string(peer).c_str());
         else
             on_receive_proposal_echo(*e);
     });
@@ -416,7 +417,7 @@ void HotStuffBase::echo2_handler(MsgEcho2 &&msg, const Net::conn_t &conn) {
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
-    RcObj<Echo> e(new Echo(std::move(msg.echo)));
+    RcObj<Echo2> e(new Echo2(std::move(msg.echo2)));
     promise::all(std::vector<promise_t>{
 //            e->verify(vpool),
             async_wait_enter_view(e->view),
@@ -465,6 +466,7 @@ void HotStuffBase::pvss_transcript_handler(MsgPVSSTranscript &&msg, const Net::c
 }
 
 void HotStuffBase::new_state_req_handler(MsgNewStateReq &&msg, const Net::conn_t &conn){
+    if(is_disabled) return;
     const NetAddr &peer = conn->get_peer_addr();
     if(peer.is_null()) return;
     msg.postponed_parse(this);

@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+
 #include "salticidae/util.h"
 #include "salticidae/network.h"
 #include "salticidae/msg.h"
@@ -136,8 +137,8 @@ struct MsgEcho {
 struct MsgEcho2 {
     static const opcode_t opcode = 0x6;
     DataStream serialized;
-    Echo echo;
-    MsgEcho2(const Echo &);
+    Echo2 echo2;
+    MsgEcho2(const Echo2 &);
     MsgEcho2(DataStream &&s): serialized(std::move(s)) {}
     void postponed_parse(HotStuffCore *hsc);
 };
@@ -423,12 +424,12 @@ class HotStuffBase: public HotStuffCore {
         pn.send_msg(MsgEcho(echo), get_config().get_addr(dest));
     }
 
-    void do_broadcast_echo2(const Echo &echo) override {
-        _do_broadcast<Echo, MsgEcho2>(echo);
+    void do_broadcast_echo2(const Echo2 &echo2) override {
+        _do_broadcast<Echo2, MsgEcho2>(echo2);
     }
 
-    void do_echo2(const Echo &echo, ReplicaID dest) override {
-        pn.send_msg(MsgEcho2(echo), get_config().get_addr(dest));
+    void do_echo2(const Echo2 &echo2, ReplicaID dest) override {
+        pn.send_msg(MsgEcho2(echo2), get_config().get_addr(dest));
     }
 
     void do_send_pvss_transcript(const PVSSTranscript &pvss_transcript, ReplicaID dest) override {

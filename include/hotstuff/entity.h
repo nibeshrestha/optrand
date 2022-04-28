@@ -67,6 +67,8 @@ class ReplicaConfig {
 
     public:
     std::vector<ReplicaID> active_ids;
+    // A duplicate array for the crypto library as it uses size_t
+    std::vector<size_t> active_indices;
     size_t nreplicas;
     size_t nactive_replicas;
     size_t nmajority;
@@ -80,6 +82,7 @@ class ReplicaConfig {
     void add_replica(ReplicaID rid, const ReplicaInfo &info) {
         replica_map.insert(std::make_pair(rid, info));
         active_ids.push_back(rid);
+        active_indices.push_back(rid);
         nreplicas++;
         nactive_replicas++;
     }
@@ -90,11 +93,13 @@ class ReplicaConfig {
 
     void activate_replica(ReplicaID rid){
         active_ids.push_back(rid);
+        active_indices.push_back(rid);
         nactive_replicas++;
     }
 
     void remove_replica(ReplicaID rid){
         active_ids.erase(std::remove(active_ids.begin(), active_ids.end(), rid), active_ids.end());
+        active_indices.erase(std::remove(active_indices.begin(), active_indices.end(), rid), active_indices.end());
         nactive_replicas--;
     }
 
@@ -121,7 +126,11 @@ class ReplicaConfig {
     void set_active_ids(std::vector<ReplicaID> &_active_ids){
         active_ids = _active_ids;
         nactive_replicas = active_ids.size();
+        active_indices.clear();
+        for(auto rid: _active_ids)
+            active_indices.push_back((size_t) rid);
     }
+
 };
 
 class Block;

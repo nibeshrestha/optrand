@@ -39,4 +39,16 @@ class printable {
 };
 
 
+template<class T>
+void printVector(const std::vector<T>& vec)
+{
+    for(size_t i=0; i<vec.size(); i++) {
+        std::cout << "i: " << i
+                  << ", "
+                  << vec[i] << ", "
+                  << std::endl;
+    }
+}
+
+
 } // namespace optrand_crypto

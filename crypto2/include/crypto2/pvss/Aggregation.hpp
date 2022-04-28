@@ -17,25 +17,15 @@ public:
     std::vector<Com_Group> commitments;
 
     std::vector<DecompositionProof> decomposition;
-    std::vector<size_t> id_vec;
+    std::vector<size_t> participant_ids;
+    std::vector<size_t> sender_ids;
+
+    // A map to find the enc/comm for replica i
+    std::unordered_map<size_t, size_t> id_to_idx_map;
 
     #ifndef NDEBUG
     Fr secret;
     #endif
-
-    pvss_aggregate_t(){}
-
-    pvss_aggregate_t(const std::vector<PK_Group> &encryptions, const std::vector<Com_Group> &commitments,
-            const std::vector<DecompositionProof> &decomposition, const std::vector<size_t> &id_vec):
-            encryptions(encryptions), commitments(commitments), decomposition(decomposition), id_vec(id_vec) {}
-
-    pvss_aggregate_t(const pvss_aggregate_t &other):
-        encryptions(other.encryptions),
-        commitments(other.commitments),
-        decomposition(other.decomposition),
-        id_vec(other.id_vec) {}
-
-
 
     friend std::ostream& operator<<(std::ostream& os, const optrand_crypto::pvss_aggregate_t& dt);
     friend std::istream& operator>>(std::istream& in, optrand_crypto::pvss_aggregate_t& dt);
@@ -49,7 +39,9 @@ inline std::ostream& operator<< (std::ostream& os, const optrand_crypto::pvss_ag
 //    os << self.encryptions << std::endl;
 //    os << self.commitments << std::endl;
     serializeVector(os, self.decomposition);
-    serializeVector(os, self.id_vec);
+    serializeVector(os, self.participant_ids);
+    serializeVector(os, self.sender_ids);
+    serializeMap(os, self.id_to_idx_map);
     #ifndef NDEBUG
     os << self.secret << std::endl;
     #endif
@@ -66,7 +58,9 @@ inline std::istream& operator>> (std::istream& in, optrand_crypto::pvss_aggregat
     deserializeVector(in, self.encryptions);
     deserializeVector(in, self.commitments);
     deserializeVector(in, self.decomposition);
-    deserializeVector(in, self.id_vec);
+    deserializeVector(in, self.participant_ids);
+    deserializeVector(in, self.sender_ids);
+    deserializeMap(in, self.id_to_idx_map);
 
     #ifndef NDEBUG
     in >> self.secret;

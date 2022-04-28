@@ -89,7 +89,7 @@ bool DleqDual<Ga, Gb, Z>::verify(const Ga& g, const Ga& gx, const Gb& h, const G
     auto lhs1 =  pi*g;
     auto rhs1 = gra+(c*gx);
     if (lhs1 != rhs1) {
-        std::cout << "Left check fail for dleq" << std::endl;
+        std::cerr << "Left check fail for dleq" << std::endl;
         return false;
     }
     auto lhs2 = pi*h;

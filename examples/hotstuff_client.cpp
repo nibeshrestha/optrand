@@ -225,12 +225,12 @@ int main(int argc, char **argv) {
 //    connect_all();
 
 //    set_req_timer();
-    if(to_start_replica > 0){
+    if(to_start_replica > -1){
         auto conn = mn.connect_sync(replicas[to_start_replica]);
         auto cmd = new CommandDummy(cid, cnt++);
         MsgStartNewReplica msg(*cmd);
         mn.send_msg(msg, conn);
-    } else if(to_stop_replica > 0){
+    } else if(to_stop_replica > -1){
         auto conn = mn.connect_sync(replicas[to_stop_replica]);
         auto cmd = new CommandDummy(cid, cnt++);
         MsgDisableReplica msg(*cmd);

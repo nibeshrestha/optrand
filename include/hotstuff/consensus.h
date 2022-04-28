@@ -51,6 +51,7 @@ struct QC;
 struct Ack;
 struct Share;
 struct Echo;
+struct Echo2;
 struct Beacon;
 struct PVSSTranscript;
 struct NewStateReq;
@@ -159,6 +160,8 @@ class HotStuffCore {
     std::unordered_map<uint32_t, block_t> committed_join_requests;
     bool join_processed;
     uint32_t joined_view;
+    bool is_new_replica;
+    uint32_t last_joined_view;
 
 
 protected:
@@ -206,7 +209,7 @@ protected:
     void on_receive_ack(const Ack &ack);
     void on_receive_share(const Share &share);
     void on_receive_proposal_echo(const Echo &echo);
-    void on_receive_cert_echo(const Echo &echo);
+    void on_receive_cert_echo(const Echo2 &echo2);
     void on_receive_beacon(const Beacon &beacon);
     void on_receive_pvss_transcript(const PVSSTranscript &pvss_transcript);
     void on_start_join();
@@ -260,8 +263,8 @@ protected:
     virtual void do_status(const Status &status) = 0;
     virtual void do_broadcast_echo(const Echo &echo) = 0;
     virtual void do_echo(const Echo &echo, ReplicaID dest) = 0;
-    virtual void do_broadcast_echo2(const Echo &echo) = 0;
-    virtual void do_echo2(const Echo &echo, ReplicaID dest) = 0;
+    virtual void do_broadcast_echo2(const Echo2 &echo2) = 0;
+    virtual void do_echo2(const Echo2 &echo2, ReplicaID dest) = 0;
     virtual void do_propose() = 0;
     virtual void do_send_pvss_transcript(const PVSSTranscript &pvss_transcript, ReplicaID dest) = 0;
     virtual void do_broadcast_new_state_req(const NewStateReq &newStateReq) = 0;
@@ -971,7 +974,7 @@ struct Echo: public Serializable {
     uint32_t mtype;
     uint256_t merkle_root;
     bytearray_t merkle_proof;
-
+    uint256_t blk_hash;
     part_cert_bt cert;
     /** chunk being proposed */
     chunk_t chunk;
@@ -985,6 +988,108 @@ struct Echo: public Serializable {
          uint32_t mtype,
          uint256_t merkle_root,
         bytearray_t merkle_proof,
+         const uint256_t &blk_hash,
+         const chunk_t &chunk,
+         part_cert_bt &&cert,
+         HotStuffCore *hsc):
+            replicaID(replicaID),
+            idx(idx), view(view),
+            mtype(mtype),
+            merkle_root(merkle_root),
+            merkle_proof(merkle_proof),
+            blk_hash(blk_hash),
+            chunk(chunk),
+            cert(std::move(cert)),
+            hsc(hsc){}
+
+    Echo(const Echo &other):
+            replicaID(other.replicaID),
+            idx(other.idx),
+            view(other.view),
+            mtype(other.mtype),
+            merkle_root(other.merkle_root),
+            merkle_proof(other.merkle_proof),
+            blk_hash(other.blk_hash),
+            chunk(other.chunk),
+            cert(other.cert ? other.cert->clone() : nullptr),
+            hsc(other.hsc){}
+
+    void serialize(DataStream &s) const override {
+        s << replicaID << idx << view << mtype << merkle_root << blk_hash;
+        s << htole((uint32_t)merkle_proof.size()) << merkle_proof;
+        s << *chunk << *cert;
+    }
+
+    inline void unserialize(DataStream &s) override {
+        s >> replicaID;
+        s >> idx;
+        s >> view;
+        s >> mtype;
+        s >> merkle_root;
+        s >> blk_hash;
+
+        uint32_t n;
+        s >> n;
+        n = letoh(n);
+        if (n == 0){
+            merkle_proof.clear();
+        }else{
+            auto base = s.get_data_inplace(n);
+            merkle_proof = bytearray_t(base, base+n);
+        }
+        Chunk _chunk;
+        s >> _chunk;
+        chunk = new Chunk(std::move(_chunk));
+        cert = hsc->parse_part_cert(s);
+    }
+
+
+    bool verify() const {
+        merkle::Hash root(merkle_root);
+        merkle::Path path(merkle_proof);
+
+        return path.verify(root);
+    }
+
+    promise_t verify(VeriPool &vpool) const {
+        assert(hsc != nullptr);
+        return cert->verify(hsc->get_config().get_pubkey(replicaID), vpool).then([this](bool result) {
+            return result && cert->get_obj_hash() == merkle_root; //  &&verify();
+        });
+    }
+
+    operator std::string () const {
+        DataStream s;
+        s << "<echo "
+          << "rid=" << std::to_string(replicaID) << " "
+          << "idx=" << std::to_string(idx) << " "
+          << "view=" << std::to_string(view) << " "
+          << "mtype=" << std::to_string(mtype) << " "
+          << "hash=" << get_hex10(merkle_root) << ">";
+        return std::move(s);
+    }
+};
+
+struct Echo2: public Serializable {
+    ReplicaID replicaID;
+    uint32_t idx;
+    uint32_t view;
+    uint32_t mtype;
+    uint256_t merkle_root;
+    bytearray_t merkle_proof;
+    part_cert_bt cert;
+    /** chunk being proposed */
+    chunk_t chunk;
+
+    HotStuffCore *hsc;
+
+    Echo2(): chunk(nullptr), hsc(nullptr) {}
+    Echo2(ReplicaID replicaID,
+         uint32_t idx,
+         uint32_t view,
+         uint32_t mtype,
+         uint256_t merkle_root,
+         bytearray_t merkle_proof,
          const chunk_t &chunk,
          part_cert_bt &&cert,
          HotStuffCore *hsc):
@@ -997,7 +1102,7 @@ struct Echo: public Serializable {
             cert(std::move(cert)),
             hsc(hsc){}
 
-    Echo(const Echo &other):
+    Echo2(const Echo2 &other):
             replicaID(other.replicaID),
             idx(other.idx),
             view(other.view),
@@ -1053,7 +1158,7 @@ struct Echo: public Serializable {
 
     operator std::string () const {
         DataStream s;
-        s << "<echo "
+        s << "<echo2 "
           << "rid=" << std::to_string(replicaID) << " "
           << "idx=" << std::to_string(idx) << " "
           << "view=" << std::to_string(view) << " "
@@ -1177,16 +1282,18 @@ struct NewStateResp: public Serializable {
     ReplicaID replicaID;
     uint32_t view;
     std::vector<ReplicaID> active_replicas;
+    std::vector<size_t> active_indices;
     bytearray_t pvss_transcript;
 
     NewStateResp() {}
-    NewStateResp(ReplicaID replicaID, uint32_t view, const std::vector<ReplicaID> &active_replicas, bytearray_t &&pvss_transcript):
-            replicaID(replicaID), view(view), active_replicas(active_replicas), pvss_transcript(std::move(pvss_transcript)){}
+    NewStateResp(ReplicaID replicaID, uint32_t view, const std::vector<ReplicaID> &active_replicas, std::vector<size_t> &active_indices, bytearray_t &&pvss_transcript):
+            replicaID(replicaID), view(view), active_replicas(active_replicas), active_indices(active_indices), pvss_transcript(std::move(pvss_transcript)){}
 
     NewStateResp(const NewStateResp &other):
             replicaID(other.replicaID),
             view(other.view),
             active_replicas(other.active_replicas),
+            active_indices(active_indices),
             pvss_transcript(std::move(other.pvss_transcript)){}
 
     NewStateResp(NewStateResp &&other) = default;
@@ -1197,6 +1304,10 @@ struct NewStateResp: public Serializable {
         s << htole((uint32_t)active_replicas.size());
         for (auto rep: active_replicas)
             s << rep;
+
+        s << htole((uint32_t)active_indices.size());
+        for (auto aid: active_indices)
+            s << aid;
 
         s << htole((uint32_t)pvss_transcript.size()) << pvss_transcript;
     }
@@ -1209,6 +1320,12 @@ struct NewStateResp: public Serializable {
         active_replicas.resize(n);
         for (auto &rep: active_replicas)
             s >> rep;
+
+        s >> n;
+        n = letoh(n);
+        active_indices.resize(n);
+        for (auto &aid: active_indices)
+            s >> aid;
 
         s >> n;
         n = letoh(n);
