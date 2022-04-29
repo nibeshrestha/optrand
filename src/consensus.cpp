@@ -1144,7 +1144,7 @@ void HotStuffCore::on_receive_join(const Join &join){
 
 void HotStuffCore::on_receive_join_success(const hotstuff::JoinSuccess &js) {
     LOG_PROTO("got %s", std::string(js).c_str());
-    LOG_WARN("Joined in view %d" js.view);
+    LOG_WARN("Joined in view %d", js.view);
 
     if(join_processed)
         return;
