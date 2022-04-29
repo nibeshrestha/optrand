@@ -113,6 +113,11 @@ inline bool Context::verify_beacon(const pvss_aggregate_t& agg, const beacon_t& 
     for(const auto& decomp: agg.decomposition) {
         gs = gs + decomp.gs;
     }
+    #ifndef NDEBUG
+    if(gs != agg.secret * Com_generator) {
+        std::cerr << "Incorrect reconstruction" << std::endl;
+    }
+    #endif
     auto lhs = libff::default_ec_pp::reduced_pairing(PK_generator, gs);
     if (lhs != libff::default_ec_pp::reduced_pairing(beacon.recon, Com_generator)) {
         std::cerr << "Beacon reconstruction check failed" << std::endl;
