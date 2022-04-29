@@ -454,7 +454,6 @@ void HotStuffCore::_update_agg_queue(const uint32_t _view){
     auto to_update_view = _view - config.nmajority + 1;
     auto to_update_proposer = get_proposer(to_update_view);
     agg_queue[to_update_proposer] = view_agg_transcripts[to_update_view];
-
 }
 
 void HotStuffCore::on_receive_beacon(const Beacon &beacon){
@@ -988,11 +987,17 @@ void HotStuffCore::on_enter_view(const uint32_t _view) {
         auto join_replicaID = _blk->get_join_replicaID();
         auto jreq_agg = _blk->get_jreq_agg();
 
-
         config.activate_replica(join_replicaID);
         add_active_peer(config.get_addr(join_replicaID));
         last_joined_view = _view;
-        // Todo: Send beacon along with other required information
+
+        std::string str(jreq_agg.begin(), jreq_agg.end());
+        std::stringstream ss2;
+        ss2.str(str);
+
+        optrand_crypto::pvss_aggregate_t agg;
+        ss2 >> agg;
+        agg_queue[join_replicaID] = agg;
 
         JoinSuccess joinSuccess(id, _view);
         do_send_join_success(joinSuccess, join_replicaID);
