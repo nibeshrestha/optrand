@@ -30,3 +30,10 @@ log*
 build/
 *CTestTestfile.cmake
 crypto/bin
+aws/settings.json
+aws/hotstuff-sec*
+aws/pvss-sec*
+aws/pvss-setup.dat
+aws/hotstuff.conf
+aws/ip.txt
+aws/ips.txt

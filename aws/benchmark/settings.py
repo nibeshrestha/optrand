@@ -1,21 +1,3 @@
-# class AwsAccessSettings:
-#     aws_access_key_id = "AKIA6KNQANMVOOXSWHC3"
-#     aws_secret_access_key = "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"
-
-# class InstanceSettings:
-#     type = "t3.micro"
-#     regions = [
-#         "us-east-1",        # N. Virginia
-#         "us-east-2",        # Ohio
-#         "us-west-1",        # N. California
-#         "us-west-2",        # Oregon
-#         "ca-central-1",     # Canada
-#         "eu-west-1",        # Ireland
-#         "ap-southeast-1",   # Singapore
-#         "ap-northeast-1",   # Tokyo
-#     ]
-
-
 from json import load, JSONDecodeError
 
 class SettingsError(Exception):

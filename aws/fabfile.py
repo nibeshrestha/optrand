@@ -1,9 +1,7 @@
 from typing import OrderedDict
 from fabric import task
 
-from benchmark.config import BenchParameters
 from benchmark.utils import BenchError, Print
-from benchmark.settings import Settings
 from benchmark.remote import Bench
 from benchmark.instance import Manager
 
@@ -41,15 +39,31 @@ def install(ctx):
         Print.error(e)
 
 @task
-def remote_optrand(ctx, debug=False):
+def start(ctx, max=2):
+    '''Start all the instances'''
+    try:
+        Manager.make().start_instances(max)
+    except BenchError as e:
+        Print.error(e)
+
+@task
+def shutdown(ctx):
+    '''Shut down all the instances'''
+    try:
+        Manager.make().stop_instances()
+    except BenchError as e:
+        Print.error(e)
+
+@task
+def remote_optrand(ctx, nodes=17, debug=False):
     ''' Run benchmarks on AWS '''
     bench_params = {
-        'nodes': [5],              # Number of replicas
+        'nodes': [nodes],           # Number of replicas
         'workers': 1,               # Number of clients
         'iter': 1,                  # Number of iterations (Ask Nibesh)
         'prefix': 'hotstuff',       # Prefix for creating config
-        'duration': 300,            # Time to run the experiment
-        'runs': 2,                  # Num of times to run the experiment
+        'duration': 120,            # Time to run the experiment
+        'runs': 1,                  # Num of times to run the experiment
     }
     try:
         Bench(ctx).run_bench_optrand(bench_params, debug)

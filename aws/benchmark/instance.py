@@ -63,7 +63,7 @@ class Manager:
                 {
                     'IpProtocol': 'tcp',
                     'FromPort': 0,
-                    'ToPort': 40000,
+                    'ToPort': 50000,
                     'IpRanges': [{
                         'CidrIp': '0.0.0.0/0',
                         'Description': 'OptRand ports',

@@ -1,6 +1,6 @@
 import subprocess
 from time import sleep
-from fabric import task, Connection, ThreadingGroup as Group, transfer
+from fabric import Connection, ThreadingGroup as Group
 from fabric.exceptions import GroupException
 from paramiko import PasswordRequiredException, RSAKey, SSHException
 from os.path import splitext, basename
@@ -44,34 +44,32 @@ class Bench:
 
     def install(self):
         Print.info('Installing dependencies and cloning the repo...')
+        root_dir = PathMaker.project_dir(self.settings)
         cmd = [
             # Clone the repo.
-            f'(git clone {self.settings.repo_url} || (cd {self.settings.repo_name} ; git pull))',
+            f'(git clone {self.settings.repo_url} || (cd {root_dir} ; git pull))',
         
             # Run the packages dependency installer
-            f"(cd {self.settings.repo_name}; bash docker-setup.sh)",
+            f"(cd {root_dir}; bash docker-setup.sh)",
 
             # Copy some libraries
             "sudo cp /usr/local/lib/libJerasure.* /usr/lib",
             "sudo cp /usr/local/lib/libgf_complete.* /usr/lib",
         ]
         try:
-            num_nodes = self._run(cmd)
-            Print.heading(f'Initialized testbed of {num_nodes} nodes')
+            hosts = self.manager.hosts(flat=True)
+            g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+            g.run(' && '.join(cmd), hide=True)
+            Print.heading(f'Initialized testbed of {len(hosts)} nodes')
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to install repo on testbed', e)
-    
-    def _run(self, cmd) -> int: 
-        hosts = self.manager.hosts(flat=True)
-        g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
-        g.run(' && '.join(cmd), hide=True)
     
     def kill(self, hosts=[], delete_logs=False):
         assert isinstance(hosts, list)
         assert isinstance(delete_logs, bool)
         hosts = hosts if hosts else self.manager.hosts(flat=True)
-        delete_logs = CommandMaker.clean_logs() if delete_logs else 'true'
+        delete_logs = CommandMaker.clean_logs(self.settings) if delete_logs else 'true'
         cmd = [delete_logs, f'({CommandMaker.kill()} || true)']
         try:
             g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
@@ -99,65 +97,101 @@ class Bench:
         nodes = max(bench_parameters.nodes)
         if len(hosts) < nodes:
             raise FabricError("Not enough hosts to create the IP file")
-        with open("/tmp/ip.txt", "w+") as f:
+        with open(PathMaker.ip_file(self.settings, local=True), "w+") as f:
             for ip in hosts[:nodes]:
                 print(ip, file=f)
-            print("", file=f)
 
     def _config(self, hosts, bench_parameters):
         assert isinstance(bench_parameters, BenchParameters)
-        Print.info('Generating configuration files...')
+        nodes = max(bench_parameters.nodes)
 
         # DONE: Generate ip files
         Print.info('Generating IP files...')
         self._generate_ip_files(hosts, bench_parameters)
 
+        # I spent 2 days debugging this!!! Ughh!
+        # This hack is in place while I figure out why the commented code fails
+        # subprocess.run([
+        #     'bash',
+        #     'download-setup.sh',
+        #     f'{PathMaker.ip_file(self.settings, local=True)}',
+        #     f'{nodes}'
+        # ])
+
         assert isinstance(hosts, list)
         ip = hosts[0]
         c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
-        # Cleanup all local configuration files.
-        cmd = CommandMaker.cleanup()
+
+        # Cleanup all configuration files.
+        cmd = CommandMaker.cleanup(self.settings)
         c.run(cmd, hide=True)
 
         # Recompile the latest code.
-        cmd = CommandMaker.compile()
-        c.run(f'cd {self.settings.repo_name} && {cmd}', hide=True)
-
-        # Create alias for the client and nodes binary.
-        cmd = CommandMaker.alias_binaries(self.settings.repo_name)
+        cmd = CommandMaker.compile(self.settings)
         c.run(cmd, hide=True)
 
         # DONE: Generate PVSS config files
-        c.put("/tmp/ip.txt", f'{self.settings.repo_name}/ip.txt')
-        cmd = CommandMaker.generate_pvss(bench_parameters)
-        try: 
-            c.run(cmd, hide=True)
-        except Exception as e:
-            Print.warn("Please fix this pvss config generation error {e}")
+        # Print.info(f"Generating PVSS setup for {nodes} nodes")
+        # c.put(
+        #     local=PathMaker.ip_file(self.settings, local=True), 
+        #     remote=PathMaker.ip_file(self.settings, local=False)
+        # )
+        # cmd = CommandMaker.generate_pvss(self.settings, nodes)
+        # try:
+        #     c.run(cmd, hide=True, warn=True, echo=True)
+        # except Exception as e:
+        #     Print.warn(f"Please fix this pvss config generation error {e}")
+        # c.get(
+        #     remote=PathMaker.pvss_setup_file(self.settings, local=False),
+        #     local=PathMaker.pvss_setup_file(self.settings, local=True)
+        # )
 
-        # DONE: Generate hotstuff-config files
-        cmd = CommandMaker.generate_key(bench_parameters)
-        c.run(f'cd {self.settings.repo_name} && {cmd}', hide=True)
-
-        # DONE: Download the setup
-        c.get(f"{self.settings.repo_name}/pvss-setup.dat", '/tmp/pvss-setup.dat')
-        nodes = max(bench_parameters.nodes)
-        for i in range(nodes):
-            c.get(f"{self.settings.repo_name}/pvss-sec{i}.conf", f'/tmp/pvss-sec{i}.conf')
-            c.get(f"{self.settings.repo_name}/hotstuff-sec{i}.conf", f'/tmp/hotstuff-sec{i}.conf')
+        # # DONE: Generate hotstuff-config files
+        # cmd = CommandMaker.generate_key(self.settings, bench_parameters)
+        # c.run(cmd, hide=True)
+        # # DONE: Download the setup
+        # c.get(
+        #     remote=PathMaker.hotstuff_setup_file(self.settings, local=False),
+        #     local=PathMaker.hotstuff_setup_file(self.settings, local=True)
+        # )
+        # for i in range(nodes):
+        #     c.get(
+        #         remote=PathMaker.pvss_config(self.settings, i, local=False),
+        #         local=PathMaker.pvss_config(self.settings, i, local=True)
+        #     )
+        #     c.get(
+        #         remote=PathMaker.hotstuff_config(self.settings, i, local=False),
+        #         local=PathMaker.hotstuff_config(self.settings, i, local=True)
+        #     )
 
         # DONE: Push the setup to all the nodes
-        names = range(nodes + bench_parameters.workers)
-        progress = progress_bar(names, prefix='Uploading config files:')
-        for i, name in enumerate(progress):
-            for ip in hosts:
-                c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
-                c.run(f'{CommandMaker.cleanup()} || true', hide=True)
-                c.put("/tmp/ip.txt", f'{self.settings.repo_name}/ip.txt')
-                c.put('/tmp/pvss-setup.dat', f"{self.settings.repo_name}/pvss-setup.dat")
-                for i in range(nodes):
-                    c.put(f'/tmp/pvss-sec{i}.conf', f"{self.settings.repo_name}/pvss-sec{i}.conf")
-                    c.put(f'/tmp/hotstuff-sec{i}.conf',f"{self.settings.repo_name}/hotstuff-sec{i}.conf")
+        try:
+            g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
+            g.run(f'{CommandMaker.cleanup(self.settings)} || true', hide=True)
+            # Can be removed
+            # g.put(
+            #     local=PathMaker.ip_file(self.settings, local=True),
+            #     remote=PathMaker.ip_file(self.settings, local=False)
+            # ) 
+            # g.put(
+            #     local=PathMaker.pvss_setup_file(self.settings, local=True),
+            #     remote=PathMaker.pvss_setup_file(self.settings, local=False)
+            # )
+            # g.put(
+            #     local=PathMaker.hotstuff_setup_file(self.settings, local=True),
+            #     remote=PathMaker.hotstuff_setup_file(self.settings, local=False)
+            # )
+            # for i in range(nodes):
+            #     g.put(
+            #         local=PathMaker.pvss_config(self.settings, i, local=True),
+            #         remote=PathMaker.pvss_config(self.settings, i, local=False),
+            #     )
+            #     g.put(
+            #         local=PathMaker.hotstuff_config(self.settings, i, local=True),
+            #         remote=PathMaker.hotstuff_config(self.settings, i, local=False),
+            #     )
+        except GroupException as e:
+            raise BenchError('Failed to deploy configs to all the nodes', FabricError(e))
 
     def _update(self, hosts):
         assert isinstance(hosts, list)
@@ -167,14 +201,12 @@ class Bench:
         Print.info(
             f'Updating {len(hosts)} machines (branch "{self.settings.branch}")...'
         )
+        root_dir = PathMaker.project_dir(self.settings)
         cmd = [
-            f'(cd {self.settings.repo_name} && git fetch -f)',
-            f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
-            f'(cd {self.settings.repo_name} && git pull -f)',
-            f'(cd {self.settings.repo_name} && {CommandMaker.compile()})',
-            CommandMaker.alias_binaries(
-                f'./{self.settings.repo_name}'
-            )
+            f'(cd {root_dir} && git fetch -f)',
+            f'(cd {root_dir} && git checkout -f {self.settings.branch})',
+            f'(cd {root_dir} && git pull -f)',
+            CommandMaker.compile(self.settings),
         ]
         g = Group(*hosts, user='ubuntu', connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)
@@ -186,22 +218,24 @@ class Bench:
             assert isinstance(ip, str)
 
         assert len(hosts) >= nodes+workers
+
         # Kill any potentially unfinished run and delete logs.
         self.kill(hosts=hosts, delete_logs=True)
 
-        Print.info('Booting primaries...')
+        Print.info(f'Booting {nodes} servers...')
         for i, ip in enumerate(hosts[:nodes]):
-            cmd = CommandMaker.run_primary(self.settings.repo_name, i)
-            log_file = CommandMaker.log_file(self.settings.repo_name, i)
+            cmd = CommandMaker.run_primary(self.settings, i)
+            log_file = PathMaker.log_file(self.settings, i)
             self._background_run(ip, cmd, log_file)
         for ip in hosts[nodes:]:
-            cmd = CommandMaker.run_client(self.settings.repo_name)
-            log_file = CommandMaker.client_log_file(self.settings.repo_name)
+            cmd = CommandMaker.run_client(self.settings)
+            log_file = PathMaker.client_log_file(self.settings)
             self._background_run(ip, cmd, log_file)
 
     def _background_run(self, ip, command, log_file):
         name = splitext(basename(log_file))[0]
-        cmd = f'tmux new -d -s "{name}" "{command} |& tee {log_file}"'
+        print(f"Using {name}, {log_file}, {command}")
+        cmd = f'tmux new -d -s "{name}" "({command}) | tee {log_file}"'
         c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
         output = c.run(cmd, hide=True)
         self._check_stderr(output)
@@ -217,13 +251,14 @@ class Bench:
         
         for i,ip in enumerate(hosts[:nodes]):
             c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
-            log_file = CommandMaker.log_file(self.settings.repo_name, i)
+            log_file = PathMaker.log_file(self.settings, i)
             name = splitext(basename(log_file))[0]
             c.get(log_file, name)
         for ip in hosts[nodes:]:
             c = Connection(ip, user='ubuntu', connect_kwargs=self.connect)
-            client_log_file = CommandMaker.client_log_file(self.settings.repo_name)
-            name = splitext(basename(log_file))[0]
+            client_log_file = PathMaker.client_log_file(self.settings)
+            name = splitext(basename(client_log_file))[0]
+            print(f"Getting client {ip}, log: {client_log_file} and saving it as {name}")
             c.get(client_log_file, name)
 
     def run_bench_optrand(self,bench_params_dict, debug=False):
@@ -240,14 +275,14 @@ class Bench:
             Print.warn('There are not enough instances available')
             return
 
-        # Update nodes.
+        # Build the latest code
         try:
             self._update(selected_hosts)
         except (GroupException, ExecutionError) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to update nodes', e)
 
-        # Upload all configuration files.
+        # Download and upload fresh configuration files
         try:
             self._config(
                 selected_hosts, bench_parameters
@@ -267,10 +302,10 @@ class Bench:
                                         bench_parameters, 
                                         n, 
                                         bench_parameters.workers)
-                    sleep(60)
+                    sleep(bench_parameters.duration)
                     # Get the logs
-                    self._logs(selected_hosts, n, bench_parameters.workers)
                     self.kill(hosts=selected_hosts)
+                    self._logs(selected_hosts, n, bench_parameters.workers)
                 except (subprocess.SubprocessError, GroupException) as e:
                     self.kill(hosts=selected_hosts)
                     if isinstance(e, GroupException):

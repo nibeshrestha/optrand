@@ -1,5 +1,8 @@
 # Copyright(C) Facebook, Inc. and its affiliates.
+from os import stat
 from os.path import join
+
+from .settings import Settings
 
 class BenchError(Exception):
     def __init__(self, message, error):
@@ -8,20 +11,73 @@ class BenchError(Exception):
         self.cause = error
         super().__init__(message)
 
-
 class PathMaker:
     @staticmethod
-    def key_file(i):
-        assert isinstance(i, int) and i >= 0
-        return f'.node-{i}.json'
+    def project_dir(settings):
+        assert isinstance(settings, Settings)
+        return f'{settings.repo_name}'
 
     @staticmethod
-    def logs_path():
-        return 'logs'
+    def client_log_file(settings):
+        assert isinstance(settings, Settings)
+        return join(PathMaker.project_dir(settings), f'log-client')
 
     @staticmethod
-    def results_path():
-        return 'results'
+    def log_file(settings, id):
+        assert isinstance(settings, Settings)
+        assert isinstance(id, int)
+        assert id >= 0
+        return join(PathMaker.project_dir(settings), f'log{id}')
+
+    @staticmethod
+    def hotstuff_config(settings, id, local=False):
+        assert isinstance(settings, Settings)
+        assert isinstance(id, int)
+        assert id >= 0
+        if local:
+            return f"hotstuff-sec{id}.conf"
+        else:
+            root_dir = PathMaker.project_dir(settings)
+            return join(root_dir, f'hotstuff-sec{id}.conf')
+
+    @staticmethod
+    def pvss_config(settings, id, local=False):
+        assert isinstance(settings, Settings)
+        assert isinstance(id, int)
+        assert id >= 0
+        if local:
+            return f'pvss-sec{id}.conf'
+        else:
+            root_dir = PathMaker.project_dir(settings)
+            return join(root_dir, f'pvss-sec{id}.conf')
+
+    @staticmethod
+    def hotstuff_setup_file(settings, local=False):
+        assert isinstance(settings, Settings)
+        if local:
+            return 'hotstuff.conf'
+        else:
+            root_dir = PathMaker.project_dir(settings)
+            return join(root_dir, "hotstuff.conf")
+
+    @staticmethod
+    def pvss_setup_file(settings, local=False):
+        assert isinstance(settings, Settings)
+        if local:
+            return 'pvss-setup.dat'
+        else:
+            root_dir = PathMaker.project_dir(settings)
+            return join(root_dir, "pvss-setup.dat")
+
+    @staticmethod
+    def ip_file(settings, local=False):
+        assert isinstance(settings, Settings)
+        if local:
+            return 'ip.txt'
+        else:
+            root_dir = PathMaker.project_dir(settings)
+            return join(root_dir, 'ip.txt')
+
 
 class Color:
     HEADER = '\033[95m'
