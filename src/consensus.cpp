@@ -908,6 +908,7 @@ promise_t HotStuffCore::async_wait_view_change() {
 
 
 promise_t HotStuffCore::async_wait_deliver_proposal(const uint32_t _view) {
+    LOG_WARN("last view proposal received: %d _view: %d", last_view_proposal_received, _view);
     if (last_view_proposal_received >= _view)
         return promise_t([](promise_t &pm) {
             pm.resolve();

@@ -304,7 +304,6 @@ void HotStuffBase::propose_handler(MsgPropose &&msg, const Net::conn_t &conn) {
 }
 
 void HotStuffBase::vote_handler(MsgVote &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From vote_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -323,7 +322,6 @@ void HotStuffBase::vote_handler(MsgVote &&msg, const Net::conn_t &conn) {
 }
 
 void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From ack_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -342,7 +340,6 @@ void HotStuffBase::ack_handler(MsgAck &&msg, const Net::conn_t &conn) {
 }
 
 void HotStuffBase::share_handler(MsgShare &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From share_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -363,7 +360,6 @@ void HotStuffBase::share_handler(MsgShare &&msg, const Net::conn_t &conn) {
 }
 
 void HotStuffBase::beacon_handler(MsgBeacon &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From beacon_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -380,7 +376,6 @@ void HotStuffBase::beacon_handler(MsgBeacon &&msg, const Net::conn_t &conn) {
 
 
 void HotStuffBase::status_handler(MsgStatus &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From status_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -398,7 +393,6 @@ void HotStuffBase::status_handler(MsgStatus &&msg, const Net::conn_t &conn) {
 
 
 void HotStuffBase::echo_handler(MsgEcho &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From echo_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -417,7 +411,6 @@ void HotStuffBase::echo_handler(MsgEcho &&msg, const Net::conn_t &conn) {
 
 
 void HotStuffBase::echo2_handler(MsgEcho2 &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From echo2_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
@@ -432,7 +425,6 @@ void HotStuffBase::echo2_handler(MsgEcho2 &&msg, const Net::conn_t &conn) {
 
 
 void HotStuffBase::qc_handler(MsgQC &&msg, const Net::conn_t &conn) {
-    LOG_WARN("From qc_handler");
     const NetAddr &peer = conn->get_peer_addr();
     if (peer.is_null()) return;
     msg.postponed_parse(this);
