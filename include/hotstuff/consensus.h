@@ -1077,6 +1077,7 @@ struct Echo2: public Serializable {
     uint32_t mtype;
     uint256_t merkle_root;
     bytearray_t merkle_proof;
+    uint256_t blk_hash;
     part_cert_bt cert;
     /** chunk being proposed */
     chunk_t chunk;
@@ -1090,6 +1091,7 @@ struct Echo2: public Serializable {
          uint32_t mtype,
          uint256_t merkle_root,
          bytearray_t merkle_proof,
+         const uint256_t &blk_hash,
          const chunk_t &chunk,
          part_cert_bt &&cert,
          HotStuffCore *hsc):
@@ -1098,6 +1100,7 @@ struct Echo2: public Serializable {
             mtype(mtype),
             merkle_root(merkle_root),
             merkle_proof(merkle_proof),
+            blk_hash(blk_hash),
             chunk(chunk),
             cert(std::move(cert)),
             hsc(hsc){}
@@ -1109,12 +1112,13 @@ struct Echo2: public Serializable {
             mtype(other.mtype),
             merkle_root(other.merkle_root),
             merkle_proof(other.merkle_proof),
+            blk_hash(other.blk_hash),
             chunk(other.chunk),
             cert(other.cert ? other.cert->clone() : nullptr),
             hsc(other.hsc){}
 
     void serialize(DataStream &s) const override {
-        s << replicaID << idx << view << mtype << merkle_root;
+        s << replicaID << idx << view << mtype << merkle_root << blk_hash;
         s << htole((uint32_t)merkle_proof.size()) << merkle_proof;
         s << *chunk << *cert;
     }
@@ -1125,6 +1129,7 @@ struct Echo2: public Serializable {
         s >> view;
         s >> mtype;
         s >> merkle_root;
+        s >> blk_hash;
 
         uint32_t n;
         s >> n;
