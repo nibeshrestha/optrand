@@ -416,6 +416,7 @@ void HotStuffBase::echo2_handler(MsgEcho2 &&msg, const Net::conn_t &conn) {
     msg.postponed_parse(this);
     RcObj<Echo2> e(new Echo2(std::move(msg.echo2)));
     promise::all(std::vector<promise_t>{
+            async_deliver_blk(e->blk_hash, peer),
             async_wait_enter_view(e->view),
             async_wait_deliver_proposal(e->view),
     }).then([this, e, peer](const promise::values_t values) {

@@ -629,16 +629,18 @@ void HotStuffCore::_deliver_cert(const quorum_cert_bt &qc){
     root.serialise(bt);
     uint256_t hash(bt);
 
+    auto blk_hash = qc->get_obj_hash();
+
     for(int i = 0; i < config.nreplicas; i++) {
         auto path = tree.path(i);
         bytearray_t patharr;
         path->serialise(patharr);
         if (i != id) {
-            Echo2 echo2(id, (uint32_t)i, qc_view, (uint32_t)MessageType::CERT, hash, patharr, chunk_array[i],
+            Echo2 echo2(id, (uint32_t)i, qc_view, (uint32_t)MessageType::CERT, hash, patharr, blk_hash,chunk_array[i],
                       create_part_cert(*priv_key, hash, view), this);
             do_echo2(echo2, (ReplicaID)i);
         }else{
-            Echo2 echo2(id, (uint32_t)i, qc_view, (uint32_t)MessageType::CERT, hash, patharr, chunk_array[i],
+            Echo2 echo2(id, (uint32_t)i, qc_view, (uint32_t)MessageType::CERT, hash, patharr, blk_hash, chunk_array[i],
                       create_part_cert(*priv_key, hash, view), this);
             do_broadcast_echo2(echo2);
         }
