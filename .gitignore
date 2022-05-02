@@ -25,3 +25,12 @@ core
 .idea
 *.cbp
 log*
+crypto2/CTestTestfile.cmake
+crypto2/Makefile
+crypto2/bench/CTestTestfile.cmake
+crypto2/bench/Makefile
+crypto2/src/CTestTestfile.cmake
+crypto2/src/Makefile
+crypto2/src/pvss/CTestTestfile.cmake
+crypto2/src/pvss/Makefile
+
